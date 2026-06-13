@@ -51,14 +51,16 @@ one-off scripts (`migrate-from-accurate`, `sync-from-accurate`, `reconcile-*`,
 ## Step 2 — Backend config
 
 - `.firebaserc` → `{ "projects": { "default": "nusantara-erp" } }`.
-- Create `.env` with the supplied web config (note: `.env` is gitignored):
-  - `VITE_FIREBASE_API_KEY=AIzaSyAfR9buMg4D4NHbb-yPk6oXJ7XkHm5VUUM`
+- Create `.env` with the project's web config (note: `.env` is gitignored). The
+  actual values live only in the local `.env` / Firebase console — do NOT commit
+  them here:
+  - `VITE_FIREBASE_API_KEY=<from Firebase console>`
   - `VITE_FIREBASE_AUTH_DOMAIN=nusantara-erp.firebaseapp.com`
   - `VITE_FIREBASE_PROJECT_ID=nusantara-erp`
   - `VITE_FIREBASE_STORAGE_BUCKET=nusantara-erp.firebasestorage.app`
-  - `VITE_FIREBASE_MESSAGING_SENDER_ID=1077833695942`
-  - `VITE_FIREBASE_APP_ID=1:1077833695942:web:f8881e5a612c0b0641cdc7`
-  - `VITE_FIREBASE_MEASUREMENT_ID=G-JHMXZ0E6T3`
+  - `VITE_FIREBASE_MESSAGING_SENDER_ID=<from console>`
+  - `VITE_FIREBASE_APP_ID=<from console>`
+  - `VITE_FIREBASE_MEASUREMENT_ID=<from console>`
   - `VITE_USE_EMULATORS=false`, `VITE_APP_NAME=Nusantara ERP`, `VITE_APP_VERSION=1.0.0`
   - **Note:** the NSA Firestore DB is a named database `default`. Confirm the new
     project uses a standard `(default)` DB or set `VITE_FIREBASE_DB_ID` accordingly.
