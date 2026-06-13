@@ -2,7 +2,12 @@
 
 **Date:** 2026-06-13
 **Status:** Approved design, pending implementation plan
-**Source:** Cloned and rebranded from the NSA Dashboard (Nawasena Sukses Abadi) ERP.
+**Source:** Cloned and rebranded from the NSA Dashboard (Nawasena Sukses Abadi) ERP at
+`C:\Users\kenro\Downloads\NSA Dashboard`.
+
+> Handoff note: this spec is self-contained so implementation can continue in a fresh
+> session from whatever directory this folder is moved to. Start the next session by
+> reading this file, then proceed to writing an implementation plan.
 
 ---
 
@@ -12,7 +17,7 @@ Create a brand-new, fully independent ERP application — **Nusantara ERP** — 
 functional clone of the existing NSA Dashboard, but:
 
 - carries over **none** of NSA's business data,
-- is rebranded (name, colors, logo, layout),
+- is rebranded (name, colors, supplied logo, layout),
 - runs on its **own** Firebase project (data fully isolated from NSA),
 - is **deployed on Firebase Hosting** (not Vercel), and
 - adds a **new in-app "Import from Excel"** capability, because Nusantara's source
@@ -26,7 +31,7 @@ accounting logic.
 
 ## 2. Project location & repository
 
-- New folder: `C:\Users\kenro\Downloads\Nusantara ERP`
+- New folder: `C:\Users\kenro\Downloads\Nusantara ERP` (may be relocated by the owner).
 - Fresh `git init` — **no** NSA git history.
 - No links to NSA's `.vercel`, `.firebase`, or `.firebaserc`.
 
@@ -88,7 +93,8 @@ Rewrite the CSS custom properties in `style.css` (and any mirrored values in
 | `--surface-solid` | `#0f1729` | `#11181a` |
 
 Semantic colors (success/warning/danger/info) retained; success may align to a
-distinct green so it doesn't collide with the emerald primary.
+distinct green so it doesn't collide with the emerald primary. The supplied logo's
+deep emerald `#0f6e56` is part of the same family and works as a secondary brand tone.
 
 ## 6. Shell layout — Two-tier rail
 
@@ -158,18 +164,22 @@ Nusantara's records originate in spreadsheets, so add an in-app importer.
   report (created / updated / skipped / errors) shows after commit; idempotent on
   document numbers where possible.
 
-## 10. Service worker / PWA
+## 10. Logo / Service worker / PWA
 
+- **Logo:** use the owner-supplied `icon.svg` placed at the project root — an emerald
+  diamond/gem mark on a `#0f6e56` rounded-square. Do **not** generate a new mark. This
+  SVG is the source for the sidebar brand, login screen, favicon, and all PWA icons.
 - `public/sw.js`: reset `CACHE_VERSION` to `v1.0.0`; rename cache/app identifiers to
   `nusantara`.
 - `public/manifest.json`: app name, short name, theme/background colors (emerald /
   graphite), icons.
-- Regenerate PWA icons from the new SVG logo via `scripts/generate-pwa-icons.ps1`
+- Regenerate PWA icons **from `icon.svg`** via `scripts/generate-pwa-icons.ps1`
   (`icon-192`, `icon-512`, `icon-maskable-512`, `apple-touch-icon`, `favicon`,
   square sidebar logo).
 
 ## 11. Out of scope / owner responsibilities
 
+- Placing `icon.svg` in the project root (owner will drop it in).
 - Creating the actual Firebase project and pasting its web config into `.env`.
 - Running `firebase login` and the production deploy.
 - Providing a real Excel file later (the importer is template-driven for now; it can
@@ -185,3 +195,8 @@ Nusantara's records originate in spreadsheets, so add an in-app importer.
 - No string, asset, or data reference to NSA / Nawasena / Accurate remains.
 - Excel import: blank template downloads; a filled template previews and commits;
   masters auto-create; trial balance balances after opening-balance import.
+
+## 13. Next step
+
+Invoke the writing-plans skill to turn this spec into a step-by-step implementation
+plan, then execute it.
