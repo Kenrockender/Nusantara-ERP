@@ -39,11 +39,10 @@ let analytics = null;
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
-  // This project's Firestore database has ID "default" (a NAMED database), not
-  // the standard "(default)". getFirestore(app) targets "(default)" and would
-  // 404; pass the real database ID explicitly. Override via VITE_FIREBASE_DB_ID
-  // if you later create a standard "(default)" database (set it to "(default)").
-  db = getFirestore(app, import.meta.env.VITE_FIREBASE_DB_ID || 'default');
+  // Defaults to the standard "(default)" Firestore database (free Spark plan).
+  // A database literally named "default" is a NAMED database and requires
+  // Blaze/billing — override via VITE_FIREBASE_DB_ID only if you use one.
+  db = getFirestore(app, import.meta.env.VITE_FIREBASE_DB_ID || '(default)');
   storage = getStorage(app);
   if (typeof window !== 'undefined' && import.meta.env.PROD) {
     analytics = getAnalytics(app);
