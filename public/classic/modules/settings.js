@@ -1,0 +1,727 @@
+function _applyUserIdentity() {
+  const u = (DB.settings && DB.settings.user) || {};
+  // RBAC: prefer the real signed-in account + its assigned role over the shared
+  // cosmetic DB.settings.user fields, so each user sees their own identity/role.
+  const me = window.__ERP_USER || {};
+  const roleLabels = (window.erpUsers && window.erpUsers.roleLabels) || {};
+  // Keep the configured display name (nice "Nama Lengkap"); fall back to the
+  // signed-in account's name only when none is set. The ROLE, however, always
+  // reflects the real RBAC role from users/{uid}. (Per-user names will later be
+  // sourced from the Employee master — see TODO employee-user-link.)
+  const name = u.name || me.displayName || 'Pengguna';
+  const initials =
+    u.initials ||
+    name
+      .split(' ')
+      .map(w => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  const role = roleLabels[me.role] || me.role || u.role || 'Staff';
+  const access = '';
+
+  const sidebarName = document.getElementById('sidebar-username');
+  const sidebarRole = document.getElementById('sidebar-role');
+  if (sidebarName) {
+    sidebarName.textContent = name;
+  }
+  if (sidebarRole) {
+    sidebarRole.textContent = `${role}${access ? ' - ' + access : ''}`;
+  }
+
+  const photo = u.photo || '';
+  document.querySelectorAll('.avatar-sm, .avatar-xs').forEach(el => {
+    if (photo) {
+      el.textContent = '';
+      const img = document.createElement('img');
+      img.src = photo;
+      img.alt = initials;
+      el.appendChild(img);
+    } else {
+      el.textContent = initials;
+    }
+  });
+
+  const userChip = document.querySelector('.user-chip span');
+  if (userChip) {
+    const first = name.split(' ')[0] || name;
+    const restInitials = name.includes(' ')
+      ? name
+          .split(' ')
+          .slice(1)
+          .map(w => w[0])
+          .join('.') + '.'
+      : '';
+    userChip.textContent = `${first}${restInitials ? ' ' + restInitials : ''}`;
+  }
+}
+
+function editIdentity() {
+  const u = (DB.settings && DB.settings.user) || {};
+  const c = (DB.settings && DB.settings.company) || {};
+
+  openModal(
+    'Identitas Pengguna & Perusahaan',
+    `
+  <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
+    Pengguna
+  </div>
+  <div class="form-group">
+    <label class="form-label">Foto Profil</label>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="id-photo-preview" style="width:48px;height:48px;border-radius:14px;overflow:hidden;flex-shrink:0;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center"></div>
+      <input type="file" id="id-photo-file" accept="image/*" style="display:none">
+      <button class="btn-ghost" type="button" id="id-photo-upload">Upload Foto</button>
+      <button class="btn-ghost" type="button" id="id-photo-remove" style="color:var(--danger,#f87171)">Hapus</button>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Nama Lengkap</label>
+      <input class="form-input" id="id-name" type="text" value="${escapeHtml(u.name || '')}" placeholder="Nama Lengkap">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Inisial (maks. 2 huruf)</label>
+      <input class="form-input" id="id-initials" type="text" maxlength="2" value="${escapeHtml(u.initials || '')}" placeholder="HW">
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Peran (Role)</label>
+    <input class="form-input" id="id-role" type="text" value="${escapeHtml(((window.erpUsers && window.erpUsers.roleLabels) || {})[(window.__ERP_USER || {}).role] || (window.__ERP_USER || {}).role || '')}" readonly style="background:var(--surface);color:var(--muted)">
+    <div style="font-size:10px;color:var(--muted);margin-top:4px">Peran ditetapkan oleh Admin via Pengaturan → Manajemen Pengguna.</div>
+  </div>
+
+  <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 10px">
+    Perusahaan
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Nama Perusahaan</label>
+      <input class="form-input" id="id-company" type="text" value="${escapeHtml(c.name || '')}" placeholder="NUSANTARA">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Telepon</label>
+      <input class="form-input" id="id-phone" type="text" value="${escapeHtml(c.phone || '')}" placeholder="+62-811-844-2779">
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Alamat Perusahaan</label>
+    <input class="form-input" id="id-address" type="text" value="${escapeHtml(c.address || '')}" placeholder="Ruko Graha Boulevard Summarecon Serpong Blok GBVB 10, Tangerang">
+  </div>`,
+    `<button class="btn-ghost" data-action="closeModal">Batal</button>
+   <button class="btn" id="saveIdentity">Simpan</button>`
+  );
+
+  setTimeout(() => {
+    const saveBtn = document.getElementById('saveIdentity');
+    if (!saveBtn) {
+      return;
+    }
+
+    let pendingPhoto = u.photo || '';
+
+    const preview = document.getElementById('id-photo-preview');
+    const fileInput = document.getElementById('id-photo-file');
+    const uploadBtn = document.getElementById('id-photo-upload');
+    const removeBtn = document.getElementById('id-photo-remove');
+
+    function renderPhotoPreview() {
+      if (!preview) {
+        return;
+      }
+      if (pendingPhoto) {
+        preview.textContent = '';
+        const img = document.createElement('img');
+        img.src = pendingPhoto;
+        img.alt = '';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+        preview.appendChild(img);
+      } else {
+        const nm = document.getElementById('id-name')?.value || u.name || 'P';
+        preview.textContent = nm
+          .split(' ')
+          .map(w => w[0])
+          .join('')
+          .slice(0, 2)
+          .toUpperCase();
+      }
+      if (removeBtn) {
+        removeBtn.style.display = pendingPhoto ? '' : 'none';
+      }
+    }
+    renderPhotoPreview();
+
+    uploadBtn?.addEventListener('click', () => fileInput?.click());
+    removeBtn?.addEventListener('click', () => {
+      pendingPhoto = '';
+      if (fileInput) {
+        fileInput.value = '';
+      }
+      renderPhotoPreview();
+    });
+
+    fileInput?.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        showToast('File harus berupa gambar', 'warning');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          // Resize + compress to keep the data URL small (stored in
+          // DB.settings → synced to Firestore, so it must stay tiny)
+          const SIZE = 128;
+          const canvas = document.createElement('canvas');
+          canvas.width = SIZE;
+          canvas.height = SIZE;
+          const ctx = canvas.getContext('2d');
+          const side = Math.min(img.width, img.height);
+          const sx = (img.width - side) / 2;
+          const sy = (img.height - side) / 2;
+          ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+          pendingPhoto = canvas.toDataURL('image/jpeg', 0.85);
+          renderPhotoPreview();
+        };
+        img.onerror = () => showToast('Gambar tidak dapat dibaca', 'warning');
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const name = sanitizeInput(document.getElementById('id-name').value);
+      const initials = sanitizeInput(document.getElementById('id-initials').value)
+        .toUpperCase()
+        .slice(0, 2);
+      // Role is governed by users/{uid} (Manajemen Pengguna), not this field.
+      const prevUser = (DB.settings && DB.settings.user) || {};
+      const role = prevUser.role || '';
+      const access = prevUser.access || '';
+      const company = sanitizeInput(document.getElementById('id-company').value);
+      const phone = sanitizeInput(document.getElementById('id-phone').value);
+      const address = sanitizeInput(document.getElementById('id-address').value);
+
+      if (!name) {
+        showToast('Nama tidak boleh kosong', 'warning');
+        return;
+      }
+
+      if (!DB.settings) {
+        DB.settings = {};
+      }
+      DB.settings.user = { name, initials, role, access, photo: pendingPhoto };
+      DB.settings.company = { name: company, phone, address };
+
+      saveDB();
+      closeModal();
+      _applyUserIdentity();
+      showToast('Identitas berhasil disimpan', 'success');
+    });
+  }, 50);
+}
+
+ERP.registerAction('editIdentity', function editIdentityAction() {
+  editIdentity();
+  return true;
+});
+
+window._companyProfile = { open: function () { editIdentity(); } };
+
+document.addEventListener(
+  'click',
+  function settingsIdentityShortcut(e) {
+    const btn = e.target.closest('[data-action="openSettings"]');
+    if (!btn) {
+      return;
+    }
+    if (btn.dataset.title !== 'Profil Perusahaan') {
+      return;
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    editIdentity();
+  },
+  true
+);
+
+// FIX: A `function` declaration is hoisted to the global scope BEFORE any
+// statement executes. That means `const _origPrintDocument = printDocument`
+// would have captured this settings.js version (not erp-crud.js's), making
+// every print call recurse infinitely.
+//
+// The fix: assign to window.printDocument via a function *expression* — these
+// are NOT hoisted, so _origPrintDocument correctly captures the erp-crud.js
+// version at the moment this line runs.
+const _origPrintDocument = printDocument;
+window.printDocument = function printDocumentWithCompanyInfo(type, data) {
+  const c = (DB.settings && DB.settings.company) || {};
+  const companyName = c.name || 'NUSANTARA';
+  const companyAddress = c.address || 'Ruko Graha Boulevard Summarecon Serpong Blok GBVB 10, Jl. Gading Serpong Boulevard, Kel. Curug Sangereng, Kec. Klp. Dua, Tangerang - Banten 15810';
+  const companyPhone = c.phone || '+62-811-844-2779';
+
+  const _origWindowOpen = window.open;
+  window.open = function patchedWindowOpen(url, target, features) {
+    const win = _origWindowOpen.call(window, url, target, features);
+    if (!win) {
+      return win;
+    }
+
+    const _origWrite = win.document.write.bind(win.document);
+    win.document.write = function patchedWrite(html) {
+      const patched = html
+        .replace(/PT\. NUSANTARA ERP/g, `${escapeHtml(companyName)} ERP`)
+        .replace(/Ruko Graha Boulevard Summarecon Serpong/g, escapeHtml(companyAddress))
+        .replace(/\+62-811-844-2779/g, escapeHtml(companyPhone));
+      _origWrite(patched);
+      win.document.write = _origWrite;
+    };
+    return win;
+  };
+
+  try {
+    _origPrintDocument(type, data);
+  } finally {
+    window.open = _origWindowOpen;
+  }
+};
+
+document.addEventListener('DOMContentLoaded', _applyUserIdentity);
+if (document.readyState !== 'loading') {
+  _applyUserIdentity();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECURITY & BACKUP SETTINGS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Change Password
+function showChangePassword() {
+  openModal(
+    'Ganti Password',
+    `
+    <div class="form-group">
+      <label class="form-label">Password Lama</label>
+      <input class="form-input" id="pwd-current" type="password" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password Baru</label>
+      <input class="form-input" id="pwd-new" type="password" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Konfirmasi Password Baru</label>
+      <input class="form-input" id="pwd-confirm" type="password" autocomplete="new-password">
+    </div>
+    <div style="padding:12px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted);margin-top:12px">
+      <strong>Tips keamanan:</strong><br>
+      • Gunakan minimal 8 karakter<br>
+      • Kombinasikan huruf besar, kecil, angka, dan simbol<br>
+      • Jangan gunakan password yang mudah ditebak
+    </div>
+  `,
+    `<button class="btn-ghost" data-action="closeModal">Batal</button>
+   <button class="btn" id="savePassword">Simpan</button>`
+  );
+
+  setTimeout(() => {
+    document.getElementById('savePassword')?.addEventListener('click', async () => {
+      const current = document.getElementById('pwd-current').value;
+      const newPwd = document.getElementById('pwd-new').value;
+      const confirm = document.getElementById('pwd-confirm').value;
+
+      if (!current || !newPwd || !confirm) {
+        showToast('Semua field harus diisi', 'warning');
+        return;
+      }
+
+      if (newPwd !== confirm) {
+        showToast('Password baru tidak cocok', 'warning');
+        return;
+      }
+
+      if (newPwd.length < 6) {
+        showToast('Password baru minimal 6 karakter', 'warning');
+        return;
+      }
+
+      try {
+        await window.erpAuth.changePassword(current, newPwd);
+        closeModal();
+        showToast('Password berhasil diubah', 'success');
+      } catch (error) {
+        showToast(error.message, 'danger');
+      }
+    });
+  }, 50);
+}
+
+// Backup Management
+function showBackupManager() {
+  const status = window.erpBackup.getBackupStatus();
+  const backups = window.erpBackup.getBackupList();
+
+  const statusHtml = status.lastBackup
+    ? `<div style="display:flex;align-items:center;gap:8px;padding:12px;background:var(--bg);border-radius:8px;margin-bottom:16px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34C759" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700">Backup Otomatis Aktif</div>
+          <div style="font-size:11px;color:var(--muted)">
+            Terakhir: ${status.lastBackupDate} • 
+            Backup berikutnya dalam ${status.hoursUntilNext} jam
+          </div>
+        </div>
+      </div>`
+    : `<div style="padding:12px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;margin-bottom:16px;font-size:12px;color:#92400E">
+        Belum ada backup otomatis. Backup pertama akan dibuat dalam 24 jam.
+      </div>`;
+
+  const backupListHtml =
+    backups.length > 0
+      ? backups
+          .map(
+            b => `
+        <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:700">${b.date}</div>
+            <div style="font-size:11px;color:var(--muted)">${b.sizeFormatted}</div>
+          </div>
+          <button class="btn-ghost" data-action="restoreBackup" data-key="${b.key}" style="font-size:11px;padding:4px 12px">
+            Pulihkan
+          </button>
+        </div>
+      `
+          )
+          .join('')
+      : `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+        Belum ada backup tersimpan
+      </div>`;
+
+  openModal(
+    'Kelola Backup',
+    `
+    ${statusHtml}
+    
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn" id="exportBackup" style="flex:1">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export ke File
+      </button>
+      <button class="btn-ghost" id="importBackup" style="flex:1">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Import dari File
+      </button>
+      <button class="btn-ghost" id="forceBackup" style="padding:8px 16px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+    </div>
+
+    <button class="btn-ghost" id="openExcelImport" style="width:100%;margin-bottom:12px;border:1.5px dashed var(--border);display:flex;align-items:center;justify-content:center;gap:8px;padding:10px">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      <span style="font-size:12px;font-weight:600">Import dari Excel</span>
+    </button>
+
+    <button class="btn" id="syncFirebase" style="width:100%;margin-bottom:16px;background:linear-gradient(135deg,#3B82F6,#2563EB);border:none;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+      <span style="font-size:12px;font-weight:600;color:#fff">Sinkronisasi ke Firebase</span>
+      <span style="font-size:10px;padding:2px 8px;border-radius:99px;font-weight:600;background:${window.__nsaDataMode === 'firestore' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.2)'};color:#fff">${window.__nsaDataMode === 'firestore' ? '● Cloud' : '● Lokal'}</span>
+    </button>
+
+    <input type="file" id="backupFileInput" accept=".json" style="display:none">
+
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
+      Backup Otomatis (${backups.length})
+    </div>
+    ${backupListHtml}
+  `,
+    `<button class="btn-ghost" data-action="closeModal">Tutup</button>`
+  );
+
+  setTimeout(() => {
+    // Export backup
+    document.getElementById('exportBackup')?.addEventListener('click', () => {
+      try {
+        const filename = window.erpBackup.exportToFile();
+        showToast(`Backup berhasil diekspor: ${filename}`, 'success');
+      } catch (error) {
+        showToast(`Gagal export: ${error.message}`, 'danger');
+      }
+    });
+
+    // Import backup
+    document.getElementById('importBackup')?.addEventListener('click', () => {
+      document.getElementById('backupFileInput').click();
+    });
+
+    document.getElementById('backupFileInput')?.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) {
+        return;
+      }
+
+      if (!confirm('Import backup akan menimpa semua data saat ini. Lanjutkan?')) {
+        return;
+      }
+
+      try {
+        await window.erpBackup.importFromFile(file);
+        closeModal();
+        showToast('Backup berhasil diimport. Halaman akan dimuat ulang.', 'success');
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (error) {
+        showToast(`Gagal import: ${error.message}`, 'danger');
+      }
+    });
+
+    // Import dari Excel — opens the dedicated importer screen.
+    document.getElementById('openExcelImport')?.addEventListener('click', () => {
+      closeModal();
+      if (typeof window.navigate === 'function') {
+        window.navigate('excelImport');
+      }
+    });
+
+    // Sync to Firebase
+    document.getElementById('syncFirebase')?.addEventListener('click', async () => {
+      if (!window.migrateLocalToFirestore) {
+        showToast('Fungsi migrasi belum tersedia', 'danger');
+        return;
+      }
+      if (!confirm('Upload semua data lokal ke Firebase Firestore?\n\nProses ini akan menimpa data cloud yang ada.')) return;
+
+      openModal(
+        'Sinkronisasi ke Firebase',
+        `<div id="sync-fb-body" style="text-align:center;padding:20px 0">
+          <div style="font-size:32px;margin-bottom:12px">☁️</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px">Mengupload data ke Firebase...</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px" id="sync-fb-status">Memulai...</div>
+          <div style="background:var(--bg);border-radius:99px;height:6px;overflow:hidden">
+            <div id="sync-fb-bar" style="height:100%;background:#3B82F6;width:0%;transition:width .3s;border-radius:99px"></div>
+          </div>
+        </div>`
+      );
+      const total = 23;
+      let done = 0;
+      const bar = document.getElementById('sync-fb-bar');
+      const statusEl = document.getElementById('sync-fb-status');
+      try {
+        await window.migrateLocalToFirestore(({ collection, phase }) => {
+          done++;
+          const pct = Math.round((done / (total * 2)) * 100);
+          if (bar) bar.style.width = Math.min(pct, 95) + '%';
+          if (statusEl)
+            statusEl.textContent = (phase === 'clearing' ? 'Membersihkan: ' : 'Mengupload: ') + collection;
+        });
+        if (bar) bar.style.width = '100%';
+        const body = document.getElementById('sync-fb-body');
+        if (body)
+          body.innerHTML = `
+          <div style="font-size:32px;margin-bottom:12px">✅</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;color:#16a34a">Sinkronisasi Berhasil!</div>
+          <div style="font-size:12px;color:var(--muted)">Data tersimpan di Firebase Cloud. Dashboard akan reload.</div>`;
+        showToast('Data berhasil disinkronisasi ke Firebase', 'success');
+        setTimeout(() => { closeModal(); location.reload(); }, 2000);
+      } catch (e) {
+        const body = document.getElementById('sync-fb-body');
+        if (body)
+          body.innerHTML = `
+          <div style="font-size:32px;margin-bottom:12px">❌</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;color:var(--danger)">Gagal Sinkronisasi</div>
+          <div style="font-size:12px;color:var(--muted)">${e.message}</div>`;
+        showToast('Gagal: ' + e.message, 'danger');
+      }
+    });
+
+    // Force backup
+    document.getElementById('forceBackup')?.addEventListener('click', () => {
+      try {
+        window.erpBackup.forceBackup();
+        closeModal();
+        showToast('Backup manual berhasil dibuat', 'success');
+        setTimeout(() => showBackupManager(), 500);
+      } catch (error) {
+        showToast(`Gagal membuat backup: ${error.message}`, 'danger');
+      }
+    });
+
+    // Restore backup
+    document.querySelectorAll('[data-action="restoreBackup"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        if (!confirm('Pulihkan backup ini? Data saat ini akan ditimpa.')) {
+          return;
+        }
+
+        try {
+          window.erpBackup.restoreFromBackup(key);
+          closeModal();
+          showToast('Backup berhasil dipulihkan. Halaman akan dimuat ulang.', 'success');
+          setTimeout(() => window.location.reload(), 1500);
+        } catch (error) {
+          showToast(`Gagal memulihkan: ${error.message}`, 'danger');
+        }
+      });
+    });
+  }, 50);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INSTALL APP (PWA)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Chrome/Edge/Android: native install via window.erpPwa (beforeinstallprompt,
+// captured in src/pwa-register.js). Safari has no install API, so iOS gets
+// "Tambahkan ke Layar Utama" steps and macOS gets "Add to Dock" steps.
+function showInstallApp() {
+  const ua = navigator.userAgent;
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/i.test(ua);
+  const isSafariDesktop =
+    !isIOS && /Macintosh/.test(ua) && /Safari\//.test(ua) && !/Chrome|Chromium|Edg\/|OPR\//.test(ua);
+  const isFirefox = /Firefox\//.test(ua);
+  const standalone = !!(window.erpPwa && window.erpPwa.isStandalone());
+  const canPrompt = !!(window.erpPwa && window.erpPwa.canPrompt());
+
+  const shareIcon =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+
+  function steps(list) {
+    return list
+      .map(
+        (s, i) => `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px">
+        <div style="width:20px;height:20px;border-radius:50%;background:var(--primary,#2563EB);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i + 1}</div>
+        <div style="font-size:12.5px;line-height:1.5">${s}</div>
+      </div>`
+      )
+      .join('');
+  }
+
+  let body = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <img src="/icon-192.png" alt="Nusantara ERP" style="width:48px;height:48px;border-radius:12px">
+      <div style="font-size:12px;color:var(--muted);line-height:1.5">
+        Pasang Nusantara ERP sebagai aplikasi: dibuka langsung dari homescreen/desktop,
+        tampil layar penuh tanpa address bar, dan tetap bisa diakses saat offline.
+      </div>
+    </div>`;
+
+  if (standalone) {
+    body += `
+    <div style="display:flex;align-items:center;gap:10px;padding:14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;color:#166534">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <div style="font-size:13px;font-weight:600">Aplikasi sudah terpasang — Anda sedang menggunakannya dalam mode aplikasi.</div>
+    </div>`;
+  } else if (canPrompt) {
+    body += `
+    <button class="btn" id="pwa-install-now" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:13px;font-weight:700">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Pasang Sekarang
+    </button>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:10px">
+      Browser akan menampilkan dialog konfirmasi pemasangan.
+    </div>`;
+  } else if (isIOS) {
+    body += `
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">iPhone / iPad</div>
+    ${steps([
+      'Buka aplikasi ini di <strong>Safari</strong> (Chrome iOS juga bisa)',
+      `Ketuk tombol <strong>Bagikan</strong> ${shareIcon} di bagian bawah layar`,
+      'Scroll ke bawah, pilih <strong>"Tambahkan ke Layar Utama"</strong> <em>(Add to Home Screen)</em>',
+      'Ketuk <strong>"Tambah"</strong> — ikon Nusantara ERP muncul di homescreen',
+    ])}`;
+  } else if (isSafariDesktop) {
+    body += `
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Safari (Mac)</div>
+    ${steps([
+      'Buka menu <strong>File</strong> di bar menu Safari',
+      'Pilih <strong>"Tambahkan ke Dock"</strong> <em>(Add to Dock)</em> — perlu Safari 17 / macOS Sonoma ke atas',
+      'Klik <strong>"Tambah"</strong> — Nusantara ERP muncul di Dock sebagai aplikasi',
+    ])}`;
+  } else if (isFirefox) {
+    body += `
+    <div style="padding:12px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;font-size:12px;color:#92400E;line-height:1.5">
+      Firefox desktop tidak mendukung pemasangan PWA. Gunakan <strong>Chrome</strong> atau <strong>Edge</strong> untuk memasang aplikasi.
+      Di Firefox Android: menu <strong>⋮</strong> → <strong>"Tambahkan ke Layar Utama"</strong>.
+    </div>`;
+  } else if (isAndroid) {
+    body += `
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Android (Chrome)</div>
+    ${steps([
+      'Ketuk menu <strong>⋮</strong> di kanan atas Chrome',
+      'Pilih <strong>"Tambahkan ke Layar utama"</strong> atau <strong>"Instal aplikasi"</strong>',
+      'Konfirmasi — ikon Nusantara ERP muncul di homescreen',
+    ])}`;
+  } else {
+    body += `
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Chrome / Edge (Desktop)</div>
+    ${steps([
+      'Cari ikon <strong>install</strong> (layar dengan panah ke bawah) di ujung kanan <strong>address bar</strong>, lalu klik <strong>"Instal"</strong>',
+      'Atau: menu <strong>⋮</strong> → <strong>"Simpan dan bagikan"</strong> → <strong>"Instal Nusantara ERP…"</strong>',
+    ])}
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5">
+      Jika ikon install tidak muncul, kemungkinan aplikasi sudah pernah dipasang —
+      buka dari ikon Nusantara ERP di desktop/launcher. Pastikan juga halaman dibuka via
+      <strong>https</strong> (bukan alamat IP lokal).
+    </div>`;
+  }
+
+  openModal(
+    'Install Aplikasi',
+    body,
+    `<button class="btn-ghost" data-action="closeModal">Tutup</button>`
+  );
+
+  setTimeout(() => {
+    document.getElementById('pwa-install-now')?.addEventListener('click', async () => {
+      const outcome = await window.erpPwa.promptInstall();
+      if (outcome === 'accepted') {
+        closeModal();
+        showToast('Aplikasi sedang dipasang — cek homescreen/desktop Anda', 'success');
+      } else if (outcome === 'dismissed') {
+        showToast('Pemasangan dibatalkan', 'warning');
+      } else {
+        showToast('Prompt install tidak tersedia — coba muat ulang halaman', 'warning');
+      }
+    });
+  }, 50);
+}
+
+// Register actions
+ERP.registerAction('installPwaApp', function () {
+  showInstallApp();
+  return true;
+});
+
+ERP.registerAction('changePassword', function () {
+  showChangePassword();
+  return true;
+});
+
+ERP.registerAction('manageBackup', function () {
+  showBackupManager();
+  return true;
+});

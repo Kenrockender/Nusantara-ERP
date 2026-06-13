@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Single-tenant internal ERP — Role-Based Access Control (real enforcement)
+    //
+    // Identity:  each account maps to a users/{uid} document { email, role,
+    //            active }. The app auto-provisions a `pending` (inactive) doc on
+    //            first login (see src/core/user-role.js); an admin assigns a real
+    //            role via Settings → Manajemen Pengguna.
+    //
+    // Roles (must mirror public/classic/core/rbac.js PERMISSIONS):
+    //   admin     — everything, incl. user management + settings + deletes
+    //   manajer   — sales/purchases/inventory/master/assets full; GL no-delete
+    //   akunting  — GL/tax full; rest read-only
+    //   penjualan — sales + customers create/edit (no delete); rest read-only
+    //   viewer    — read-only
+    //   pending   — no writes (awaiting role assignment)
+    //
+    // Bootstrap: BOOTSTRAP_ADMINS are admin by email even with no users doc, so
+    // the first admin can never be locked out. Keep in sync with user-role.js.
+    //
+    // Console prerequisites: disable public Email/Password sign-up, enable email
+    // enumeration protection, require email verification before any write.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Identity helpers ─────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+    function bootstrapAdmin() {
+      return verified() && request.auth.token.email in ['kenrockender521@gmail.com'];
+    }
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    function hasUserDoc() {
+      return signedIn() && exists(userPath());
+    }
+    function userDoc() {
+      return get(userPath()).data;
+    }
+    function isActive() {
+      return bootstrapAdmin() || (hasUserDoc() && userDoc().active == true);
+    }
+    // The effective role: bootstrap admins are always admin; an active user gets
+    // their assigned role; everyone else is 'pending' (no writes).
+    function role() {
+      return bootstrapAdmin()
+        ? 'admin'
+        : (isActive() ? userDoc().role : 'pending');
+    }
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    // ── Collection → module map ──────────────────────────────────────────────
+    function moduleOf(col) {
+      return col in ['salesOrders','salesQuotations','salesInvoices','salesReceipts','salesReturns','deliveryOrders','salesDownPayments'] ? 'sales'
+        : col in ['purchaseOrders','purchaseQuotations','purchaseInvoices','purchasePayments','purchaseReturns','purchaseDownPayments','goodsReceipts'] ? 'purchases'
+        : col in ['inventoryItems','itemAdjustments','itemTransfers','warehouses'] ? 'inventory'
+        : col in ['journals','budgets','budgetTransfers','payrollRuns'] ? 'gl'
+        : col in ['customers','suppliers','employees','fleet','expedition'] ? 'master'
+        : col in ['assets','faCategories','fiscalFaCategories','assetTransfers','assetDispositions'] ? 'assets'
+        // paymentLogs/accounts are GL side-effects of allowed sales/purchase
+        // posts (a Penjualan receipt updates cash) → treated as operational so
+        // those transactions can complete; the journal/budget GL stays gated.
+        : col in ['notifications','reservations','numberSequences','auditLog','trash','paymentLogs','accounts','backups'] ? 'operational'
+        // The single settings doc bundles admin config + reference data (asset/
+        // category/unit lists) managers maintain → 'config' (admin+manajer).
+        : col == 'settings' ? 'config'
+        : col == 'users' ? 'users'
+        : 'admin'; // unknown/meta → admin-only (safe default)
+    }
+
+    // ── Permission matrix (create/update) ────────────────────────────────────
+    function canWriteModule(m) {
+      return isAdmin() ? true
+        : role() == 'manajer' ? (m in ['sales','purchases','inventory','master','assets','gl','operational','config'])
+        : role() == 'akunting' ? (m in ['gl','tax','operational'])
+        : role() == 'penjualan' ? (m in ['sales','master','operational'])
+        : false; // viewer (read-only) / pending / unknown
+    }
+
+    // ── Permission matrix (delete) ───────────────────────────────────────────
+    function canDeleteModule(m) {
+      return isAdmin() ? true
+        : role() == 'manajer' ? (m in ['sales','purchases','inventory','master','assets','operational','config'])
+        : role() == 'akunting' ? (m in ['gl','tax','operational'])
+        : role() == 'penjualan' ? (m == 'operational')
+        : false; // viewer (read-only) / pending
+    }
+
+    // ── users/{uid}: identity collection (most specific match) ────────────────
+    // Read: admins, or the owner of the document.
+    // Create: an admin, OR a user self-provisioning their OWN doc with the
+    //         non-privileged `pending` role (first-login bootstrap).
+    // Update/Delete: admins only — a user can never escalate their own role.
+    match /users/{uid} {
+      allow read: if signedIn() && (isAdmin() || uid == request.auth.uid);
+      allow create: if isAdmin()
+                    || (verified() && uid == request.auth.uid
+                        && request.resource.data.role == 'pending');
+      allow update, delete: if isAdmin();
+    }
+
+    // ── glSeed: read-only GL seed (Accurate journals + chart of accounts) ─────
+    // Replaces the old PUBLIC public/accurate-data.json, whose flat file exposed
+    // the company's full financials (5,501 journal vouchers) to anyone — Firebase
+    // Hosting serves static files without auth. Now the seed lives here: any
+    // signed-in user may read it (same posture as the rest of the business data,
+    // which the catch-all below also gates at signedIn()), and only admins may
+    // write it (the one-time migration + any future Accurate re-scrape). The
+    // catch-all would already cover this (moduleOf('glSeed') → 'admin'); this
+    // explicit block documents and pins the intent.
+    match /glSeed/{doc} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Everything else: catch-all so newly added collections stay covered ────
+    // {document=**} matches the top-level collection AND all nested
+    // subcollections (e.g. backups/{id}/chunks/{n}), so depth>2 documents stay
+    // covered — a plain /{collection}/{docId} would DENY them. The module is
+    // keyed off the top-level collection name. (users is handled above and
+    // excluded from reads here to keep it private.)
+    match /{collection}/{document=**} {
+      allow read: if signedIn() && collection != 'users';
+      allow create, update: if verified() && canWriteModule(moduleOf(collection));
+      allow delete: if verified() && canDeleteModule(moduleOf(collection));
+    }
+  }
+}

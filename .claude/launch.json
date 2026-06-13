@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8088,
+      "autoPort": true
+    },
+    {
+      "name": "preview-dist",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--", "--port", "4173"],
+      "port": 4173,
+      "autoPort": false
+    },
+    {
+      "name": "verify",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5199"],
+      "port": 5199,
+      "autoPort": false
+    },
+    {
+      "name": "erp-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "erp-demo", "-p", "5210", "--no-clipboard"],
+      "port": 5210,
+      "autoPort": false
+    }
+  ]
+}

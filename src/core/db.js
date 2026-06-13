@@ -1,0 +1,1646 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// NUSANTARA ERP — Database Module (Firestore)
+// Replaces localStorage with Firestore for real-time sync
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  onSnapshot,
+  writeBatch,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db as firestore, isFirebaseConfigured } from '../config/firebase.js';
+import { kvGet, kvSet } from './local-store.js';
+
+// Global DB object (in-memory cache).
+// IMPORTANT: Vite's bundler hoists `DB` as a module-local variable, so
+// `DB = ...` inside this module does NOT update the `window.DB` reference
+// that classic <script> files read. We must call syncDBGlobal() after every
+// reassignment to keep both in sync.
+window.DB = {};
+let DB = window.DB;
+function syncDBGlobal() {
+  window.DB = DB;
+}
+
+// Collection names synced with Firestore (load + realtime + save + migrate).
+// NOTE: journals and accountsChart are intentionally NOT synced — gl-sync.js
+// rebuilds them locally from the source documents on every load/save
+// (GL.reconcileAll), so each device regenerates its own. auditLog is local-only
+// by design. Everything else here is real user data that must sync.
+const COLLECTIONS = {
+  SALES_ORDERS: 'salesOrders',
+  PURCHASE_ORDERS: 'purchaseOrders',
+  INVENTORY_ITEMS: 'inventoryItems',
+  DELIVERY_ORDERS: 'deliveryOrders',
+  CUSTOMERS: 'customers',
+  SUPPLIERS: 'suppliers',
+  PAYMENT_LOGS: 'paymentLogs',
+  NOTIFICATIONS: 'notifications',
+  ACCOUNTS: 'accounts',
+  RESERVATIONS: 'reservations',
+  SETTINGS: 'settings',
+  FLEET: 'fleet',
+  EXPEDITION: 'expedition',
+  // Document-flow collections (added 2026-06-06 so all modules sync, not just core)
+  SALES_INVOICES: 'salesInvoices',
+  PURCHASE_INVOICES: 'purchaseInvoices',
+  SALES_RECEIPTS: 'salesReceipts',
+  PURCHASE_PAYMENTS: 'purchasePayments',
+  SALES_QUOTATIONS: 'salesQuotations',
+  PURCHASE_QUOTATIONS: 'purchaseQuotations',
+  SALES_RETURNS: 'salesReturns',
+  PURCHASE_RETURNS: 'purchaseReturns',
+  ITEM_ADJUSTMENTS: 'itemAdjustments',
+  ITEM_TRANSFERS: 'itemTransfers',
+  WAREHOUSES: 'warehouses',
+  // Master data: employees (payroll module + department-driven RBAC role
+  // assignment). Added so employee records sync across devices.
+  EMPLOYEES: 'employees',
+  NUMBER_SEQUENCES: 'numberSequences',
+  AUDIT_LOG: 'auditLog',
+  // Recycle bin (trash.js): deleted records held for one-click restore.
+  TRASH: 'trash',
+};
+
+// Collections stored as a single object document ('default'), not an array.
+const OBJECT_COLLECTIONS = new Set(['accounts', 'reservations', 'settings', 'numberSequences']);
+function isObjectCollection(name) {
+  return OBJECT_COLLECTIONS.has(name);
+}
+
+// Real-time listeners
+const listeners = new Map();
+
+// Local-first persistence: when Firestore is unavailable, the whole DB is
+// mirrored to IndexedDB (store 'kv' of database 'nsa-local') so data survives a
+// page refresh. localStorage is only used as a legacy/migration source and as
+// the handoff channel from import.html — it caps at ~5–10MB and the dataset
+// already exceeds that comfort zone.
+const LOCAL_KEY = 'erp_db_v1';
+// Remember a Firestore outage so we don't re-probe (and block boot) on every
+// refresh. Retry at most once per interval.
+const FS_FAIL_KEY = 'erp_fs_unavailable_until';
+const FS_RETRY_INTERVAL = 30 * 60 * 1000; // 30 minutes
+let usingLocalStore = false;
+
+/**
+ * Read the locally persisted DB. Priority:
+ *   1. localStorage erp_db_v1 — legacy data or a fresh import.html handoff.
+ *      Migrated into IndexedDB and removed (frees the localStorage quota).
+ *   2. IndexedDB 'nsa-local'/kv/erp_db_v1 — the normal storage backend.
+ * Returns the parsed object or null.
+ */
+async function readLocalSaved() {
+  // localStorage first: import.html writes here, and pre-IndexedDB installs
+  // still have their data here. Either way it wins, then moves to IndexedDB.
+  try {
+    const raw = localStorage.getItem(LOCAL_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      try {
+        await kvSet(LOCAL_KEY, parsed);
+        localStorage.removeItem(LOCAL_KEY);
+        console.warn('[DB] Migrated local data localStorage → IndexedDB');
+      } catch (e) {
+        console.warn('[DB] IndexedDB migration failed, keeping localStorage copy:', e);
+      }
+      return parsed;
+    }
+  } catch (_) {
+    /* localStorage unavailable or corrupt — fall through to IndexedDB */
+  }
+
+  try {
+    const saved = await kvGet(LOCAL_KEY);
+    if (saved && typeof saved === 'object') {
+      return saved;
+    }
+  } catch (e) {
+    console.warn('[DB] IndexedDB read failed:', e);
+  }
+  return null;
+}
+
+/** Load the DB from IndexedDB/localStorage, or seed defaults on first run. */
+async function loadLocal(reason) {
+  let saved;
+  try {
+    saved = await readLocalSaved();
+  } catch (_) {
+    saved = null;
+  }
+
+  // Drop an empty saved copy so we fall through to the (empty) defaults seed.
+  if (
+    saved &&
+    !(
+      (saved.salesOrders || []).length > 0 ||
+      (saved.inventoryItems || []).length > 0 ||
+      (saved.customers || []).length > 0
+    )
+  ) {
+    saved = null;
+  }
+
+  if (saved) {
+    DB = normalizeImportedDB(saved);
+    console.warn(`[DB] Loaded local data from IndexedDB (${reason})`);
+  } else {
+    // No real local data yet. Business data + the GL seed live in Firestore
+    // now (loadGlSeed); local mode only has whatever a prior Firestore load
+    // persisted. Seed the empty in-file defaults so the app boots cleanly.
+    DB = normalizeImportedDB(defaultData);
+    console.warn(`[DB] No local data yet — seeded empty defaults (${reason})`);
+  }
+
+  applyDefaults();
+  usingLocalStore = true;
+  try {
+    window.__nsaDataMode = 'local';
+  } catch (_) {
+    /* ignore */
+  }
+  persistLocal();
+}
+
+// Serialized fire-and-forget IndexedDB writes: at most one put in flight, and a
+// burst of saves coalesces into a single trailing write of the latest state.
+let _persistInFlight = false;
+let _persistQueued = false;
+
+/** Persist the entire in-memory DB to IndexedDB (async, coalesced). */
+function persistLocal() {
+  if (_persistInFlight) {
+    _persistQueued = true;
+    return true;
+  }
+  _persistInFlight = true;
+  // The write captures whatever DB holds at put() time — with coalescing that
+  // is always the latest state, which is exactly what we want persisted.
+  kvSet(LOCAL_KEY, DB)
+    .catch(err => {
+      // DataCloneError (non-cloneable value snuck into DB) → JSON round-trip
+      // strips it; other errors are surfaced.
+      if (err && err.name === 'DataCloneError') {
+        return kvSet(LOCAL_KEY, JSON.parse(JSON.stringify(DB)));
+      }
+      throw err;
+    })
+    .catch(err => {
+      console.error('[DB] Failed to persist to IndexedDB:', err);
+      try {
+        showToast('Gagal menyimpan data lokal', 'danger');
+      } catch (_) {
+        /* ignore */
+      }
+    })
+    .finally(() => {
+      _persistInFlight = false;
+      if (_persistQueued) {
+        _persistQueued = false;
+        persistLocal();
+      }
+    });
+  return true;
+}
+
+/**
+ * Initialize database - Load all collections from Firestore
+ */
+export async function loadDB() {
+  // Without credentials, Firestore calls retry for ~30s before failing and
+  // block boot. Use local persistence instead.
+  if (!isFirebaseConfigured) {
+    await loadLocal('Firebase not configured');
+    return false;
+  }
+
+  // If Firestore was recently found unavailable, skip the (slow) probe so
+  // refreshes are instant. We retry at most once per FS_RETRY_INTERVAL.
+  let failUntil = 0;
+  try {
+    failUntil = parseInt(localStorage.getItem(FS_FAIL_KEY) || '0', 10) || 0;
+  } catch (_) {
+    /* ignore */
+  }
+  if (Date.now() < failUntil) {
+    await loadLocal('Firestore recently unavailable');
+    return false;
+  }
+
+  try {
+    console.log('[DB] Loading data from Firestore...');
+
+    // Load all collections in parallel
+    const promises = Object.entries(COLLECTIONS).map(async ([_key, collectionName]) => {
+      const snapshot = await getDocs(collection(firestore, collectionName));
+      const data = [];
+      snapshot.forEach(doc => {
+        data.push({ id: doc.id, ...doc.data() });
+      });
+      // Key the in-memory cache by the camelCase collection name (e.g.
+      // "salesOrders"), which is what the rest of the app reads from DB.
+      return [collectionName, data];
+    });
+
+    // If Firestore is unreachable (e.g. the database isn't provisioned) the SDK
+    // retries for ~30s and would block boot. Cap the wait and fall back.
+    // 15s (was 4s): now loads 25 collections in parallel, and a first cold
+    // connect to a regional DB (e.g. asia-southeast2) over the auth handshake can
+    // legitimately take >4s. The outage is cached for 30 min so this longer wait
+    // is only paid once when Firestore is genuinely down.
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore load timed out')), 15000)
+    );
+    const results = await Promise.race([Promise.all(promises), timeout]);
+
+    // Populate DB object
+    results.forEach(([key, data]) => {
+      if (isObjectCollection(key)) {
+        // These are objects, not arrays
+        DB[key] = data.length > 0 ? data[0] : getDefaultValue(key);
+      } else {
+        DB[key] = data;
+      }
+    });
+
+    // Load the GL seed (Accurate journals + chart of accounts) from the
+    // auth-gated glSeed collection. This is the sole source for that data now
+    // (it replaced the public accurate-data.json).
+    await loadGlSeed();
+
+    // Apply defaults for missing data
+    applyDefaults();
+
+    // Everything in memory now matches Firestore — baseline the dirty tracker
+    // so the first saveDB() only writes records changed after this point.
+    rebaselineSaved();
+
+    // Set up real-time listeners
+    setupRealtimeListeners();
+
+    console.log('✓ Data loaded from Firestore');
+    usingLocalStore = false;
+    try {
+      window.__nsaDataMode = 'firestore';
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      localStorage.removeItem(FS_FAIL_KEY);
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  } catch (error) {
+    console.warn('[DB] Firestore unavailable, using local storage:', error.message);
+    try {
+      localStorage.setItem(FS_FAIL_KEY, String(Date.now() + FS_RETRY_INTERVAL));
+    } catch (_) {
+      /* ignore */
+    }
+
+    // Fall back to local persistence (IndexedDB), seeded from defaults.
+    await loadLocal('Firestore unavailable');
+    try {
+      showToast('Mode offline — data disimpan di perangkat ini', 'warning');
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dirty-collection tracking. Almost every call site invokes saveDB() with no
+// arguments after touching a single record, so a naive full-DB save rewrites
+// thousands of unchanged documents per CRUD action — enough to blow the
+// Firestore free-tier daily write quota ("resource-exhausted"). Instead we keep
+// a per-collection snapshot of what Firestore last saw and only write the
+// records whose serialized form actually differs (plus deletes for records
+// that vanished).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// collectionName → Map(id → JSON of record) for array collections,
+// or the JSON string of the whole document for object collections.
+const _savedSnapshot = new Map();
+
+function snapshotOf(name, data) {
+  if (isObjectCollection(name) || !Array.isArray(data)) {
+    return JSON.stringify(data == null ? null : data);
+  }
+  const map = new Map();
+  data.forEach(item => {
+    if (item && item.id != null) {
+      map.set(String(item.id), JSON.stringify(item));
+    }
+  });
+  return map;
+}
+
+function markCollectionSaved(name, data) {
+  _savedSnapshot.set(name, snapshotOf(name, data));
+}
+
+/** Re-baseline every synced collection as "already saved" (e.g. after load). */
+export function rebaselineSaved() {
+  for (const name of Object.values(COLLECTIONS)) {
+    markCollectionSaved(name, DB[name]);
+  }
+}
+
+/**
+ * Compute what changed in a collection since the last successful save.
+ * Returns null when nothing changed (or the collection is absent from DB).
+ */
+function diffCollection(name) {
+  const data = DB[name];
+  if (data == null) {
+    return null;
+  }
+
+  if (isObjectCollection(name) || !Array.isArray(data)) {
+    const json = JSON.stringify(data);
+    if (_savedSnapshot.get(name) === json) {
+      return null;
+    }
+    return { kind: 'object', data, snapshot: json };
+  }
+
+  const prev = _savedSnapshot.get(name);
+  const prevMap = prev instanceof Map ? prev : new Map();
+  const nextMap = new Map();
+  const sets = [];
+  for (const item of data) {
+    if (!item || item.id == null) {
+      continue;
+    }
+    const id = String(item.id);
+    const json = JSON.stringify(item);
+    nextMap.set(id, json);
+    if (prevMap.get(id) !== json) {
+      sets.push(item);
+    }
+  }
+  const deletes = [];
+  for (const id of prevMap.keys()) {
+    if (!nextMap.has(id)) {
+      deletes.push(id);
+    }
+  }
+  if (sets.length === 0 && deletes.length === 0) {
+    return null;
+  }
+  return { kind: 'array', sets, deletes, snapshot: nextMap };
+}
+
+/** Write only the dirty records of dirty collections, in ≤450-op batches. */
+async function flushDirtyCollections() {
+  const dirty = [];
+  for (const name of Object.values(COLLECTIONS)) {
+    const diff = diffCollection(name);
+    if (diff) {
+      dirty.push([name, diff]);
+    }
+  }
+  if (dirty.length === 0) {
+    return;
+  }
+
+  let batch = writeBatch(firestore);
+  let ops = 0;
+  let total = 0;
+  const addOp = async () => {
+    ops++;
+    total++;
+    // Firestore batch limit is 500 operations — commit and start a fresh batch
+    if (ops >= 450) {
+      await batch.commit();
+      batch = writeBatch(firestore);
+      ops = 0;
+    }
+  };
+
+  for (const [name, diff] of dirty) {
+    if (diff.kind === 'object') {
+      batch.set(
+        doc(firestore, name, 'default'),
+        { ...diff.data, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      await addOp();
+      continue;
+    }
+    for (const item of diff.sets) {
+      batch.set(
+        doc(firestore, name, String(item.id)),
+        { ...item, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      await addOp();
+    }
+    for (const id of diff.deletes) {
+      batch.delete(doc(firestore, name, id));
+      await addOp();
+    }
+  }
+  if (ops > 0) {
+    await batch.commit();
+  }
+
+  // Baseline only after every batch committed; a partial failure simply
+  // rewrites the affected records on the next flush (sets are merge-idempotent).
+  for (const [name, diff] of dirty) {
+    _savedSnapshot.set(name, diff.snapshot);
+  }
+  console.log(`✓ Data saved to Firestore (${total} operations, ${dirty.length} collections)`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GL seed (auth-gated). journals (the Accurate-sourced JVs needed for P&L) and
+// accountsChart are NOT in the synced COLLECTIONS and used to come from the
+// public accurate-data.json — a confidentiality leak. They now live in the
+// admin-writable, signed-in-readable `glSeed` Firestore collection:
+//   glSeed/meta          { version, migratedAt, journalChunks, journalCount }
+//   glSeed/accountsChart { items: [...] }
+//   glSeed/journals_NNN  { items: [...] }   (journals chunked < 1 MB/doc)
+// loadGlSeed() populates DB.journals / DB.accountsChart from there.
+// ─────────────────────────────────────────────────────────────────────────────
+const GL_SEED = 'glSeed';
+const GL_JOURNAL_CHUNK = 1000; // ~0.38 KB/entry → ~380 KB/doc, safely < 1 MB
+
+async function loadGlSeed() {
+  try {
+    const snap = await getDocs(collection(firestore, GL_SEED));
+    if (snap.empty) {
+      return false; // glSeed empty (offline/first cold start) — journals come from the local snapshot
+    }
+    let accountsChart = null;
+    const chunks = [];
+    snap.forEach(d => {
+      if (d.id === 'accountsChart') {
+        accountsChart = d.data().items;
+      } else if (d.id.startsWith('journals_')) {
+        chunks.push([d.id, d.data().items || []]);
+      }
+    });
+    chunks.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    const journals = chunks.flatMap(c => c[1]);
+    if (journals.length > 0) {
+      DB.journals = journals;
+    }
+    if (Array.isArray(accountsChart) && accountsChart.length > 0) {
+      DB.accountsChart = accountsChart;
+    }
+    syncDBGlobal();
+    console.log(
+      `[DB] GL seed loaded from Firestore: ${journals.length} journals, ${(accountsChart || []).length} accounts`
+    );
+    return true;
+  } catch (e) {
+    console.warn('[DB] loadGlSeed failed:', e.message);
+    return false;
+  }
+}
+
+// NOTE: the one-time glSeed migration helper (window.__migrateGlToFirestore) and
+// the deployed-JSON reseed machinery (maybeReseedFirestore + mergeDeployedData)
+// were removed when the public accurate-data.json was deleted. Updating the GL
+// seed in future re-scrapes is now an admin task that writes the glSeed docs
+// directly (see scripts/ + docs); there is no public JSON to merge from anymore.
+
+// Debounced, serialized flushing: a burst of saveDB() calls (e.g. a CRUD action
+// that touches several collections) coalesces into one diff+commit, and at most
+// one flush is in flight at a time. All callers in a burst share one promise.
+const SAVE_DEBOUNCE_MS = 250;
+let _saveTimer = null;
+let _savePromise = null;
+let _saveResolve = null;
+let _saveReject = null;
+let _saveInFlight = false;
+let _saveRerun = false;
+
+function scheduleSave() {
+  if (!_savePromise) {
+    _savePromise = new Promise((resolve, reject) => {
+      _saveResolve = resolve;
+      _saveReject = reject;
+    });
+  }
+  if (_saveTimer) {
+    clearTimeout(_saveTimer);
+  }
+  _saveTimer = setTimeout(runScheduledSave, SAVE_DEBOUNCE_MS);
+  return _savePromise;
+}
+
+function runScheduledSave() {
+  _saveTimer = null;
+  if (_saveInFlight) {
+    _saveRerun = true;
+    return;
+  }
+  const resolve = _saveResolve || (() => {});
+  const reject = _saveReject || (() => {});
+  _savePromise = null;
+  _saveResolve = null;
+  _saveReject = null;
+  _saveInFlight = true;
+  flushDirtyCollections()
+    .then(() => resolve())
+    .catch(error => {
+      reportSaveError(error);
+      reject(error);
+    })
+    .finally(() => {
+      _saveInFlight = false;
+      if (_saveRerun) {
+        _saveRerun = false;
+        runScheduledSave();
+      }
+    });
+}
+
+/** Flush any pending debounced save immediately (e.g. on page unload). */
+export function flushPendingSaves() {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer);
+    _saveTimer = null;
+  }
+  if (!_savePromise && !_saveInFlight) {
+    return Promise.resolve();
+  }
+  const pending = _savePromise || Promise.resolve();
+  runScheduledSave();
+  return pending;
+}
+
+function reportSaveError(error) {
+  console.error('Failed to save data to Firestore:', error);
+  // permission-denied almost always means the signed-in user hasn't verified
+  // their email yet (Firestore rules require email_verified for writes).
+  // Surface an actionable message instead of a generic failure.
+  try {
+    if (error && error.code === 'permission-denied') {
+      showToast(
+        'Gagal menyimpan: email belum diverifikasi. Cek banner verifikasi di atas.',
+        'danger'
+      );
+    } else {
+      showToast('Gagal menyimpan data ke server', 'danger');
+    }
+  } catch (_) {
+    /* toast unavailable (early boot) */
+  }
+}
+
+/**
+ * Save data to Firestore
+ * @param {string} collectionName - Collection to save
+ * @param {object|array} data - Data to save
+ */
+export async function saveDB(collectionName = null, data = null) {
+  // Local-first mode: mirror the whole DB to IndexedDB and stop here.
+  if (usingLocalStore) {
+    persistLocal();
+    return;
+  }
+
+  // If specific collection provided, save only that (immediately).
+  if (collectionName && data) {
+    try {
+      await saveCollection(collectionName, data);
+      markCollectionSaved(collectionName, data);
+      console.log(`✓ ${collectionName} saved to Firestore`);
+    } catch (error) {
+      reportSaveError(error);
+      throw error;
+    }
+    return;
+  }
+
+  // Otherwise diff the whole DB against the last-saved snapshot and write only
+  // what changed (debounced so rapid CRUD bursts coalesce into one commit).
+  return scheduleSave();
+}
+
+/**
+ * Save a single collection
+ */
+async function saveCollection(collectionName, data) {
+  if (Array.isArray(data)) {
+    // Save array items in chunks — a Firestore writeBatch caps at 500 ops.
+    for (let i = 0; i < data.length; i += 450) {
+      const batch = writeBatch(firestore);
+      data.slice(i, i + 450).forEach(item => {
+        const docRef = doc(firestore, collectionName, String(item.id));
+        batch.set(
+          docRef,
+          {
+            ...item,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+      await batch.commit();
+    }
+  } else {
+    // Save single object
+    const docRef = doc(firestore, collectionName, 'default');
+    await setDoc(
+      docRef,
+      {
+        ...data,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+}
+
+/**
+ * Set up real-time listeners for all collections
+ */
+// Coalesce the burst of per-collection snapshots into a single active-view
+// re-render. Also records the last sync time for the status indicator.
+let _remoteRefreshScheduled = false;
+function scheduleRemoteRefresh() {
+  try {
+    window.__nsaLastSync = Date.now();
+  } catch (_) {
+    /* ignore */
+  }
+  if (_remoteRefreshScheduled) {
+    return;
+  }
+  _remoteRefreshScheduled = true;
+  const run = () => {
+    _remoteRefreshScheduled = false;
+    try {
+      if (typeof navigate === 'function' && typeof activeView !== 'undefined' && activeView) {
+        if (typeof _renderedViews !== 'undefined') {
+          try {
+            _renderedViews.delete(activeView);
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        navigate(activeView);
+      }
+    } catch (e) {
+      console.warn('[DB] remote refresh failed:', e);
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(run);
+  } else {
+    setTimeout(run, 16);
+  }
+}
+
+function setupRealtimeListeners() {
+  Object.entries(COLLECTIONS).forEach(([, collectionName]) => {
+    const dataKey = collectionName;
+
+    // Skip if listener already exists
+    if (listeners.has(collectionName)) {
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      collection(firestore, collectionName),
+      snapshot => {
+        const data = [];
+        snapshot.forEach(doc => {
+          data.push({ id: doc.id, ...doc.data() });
+        });
+
+        // Update in-memory cache
+        if (isObjectCollection(dataKey)) {
+          DB[dataKey] = data.length > 0 ? data[0] : getDefaultValue(dataKey);
+        } else {
+          DB[dataKey] = data;
+        }
+        // SO/PO status is owned by the sync script (Accurate authority); do not
+        // re-derive from DO linkage here (see applyDefaults note + _deriveOrderStatuses).
+        syncDBGlobal();
+
+        // This collection now mirrors the server — re-baseline the dirty
+        // tracker so the next saveDB() doesn't rewrite synced records.
+        markCollectionSaved(dataKey, DB[dataKey]);
+
+        // A remote snapshot just replaced a local collection. Re-baseline the
+        // data-integrity snapshot (integrity.js) so the next local save diffs
+        // against the synced state — otherwise audit/period-lock would misfire
+        // on records that arrived via sync, not via this device.
+        if (window.Integrity && typeof window.Integrity.refreshSnapshot === 'function') {
+          window.Integrity.refreshSnapshot();
+        }
+        // Same for the recycle bin (trash.js): records removed by a remote sync
+        // were already binned on the deleting device — don't re-capture them.
+        if (window.Trash && typeof window.Trash.refreshSnapshot === 'function') {
+          window.Trash.refreshSnapshot();
+        }
+        // Same for the RBAC safety net (rbac.js): a remote-synced change is not a
+        // local edit, so re-baseline before the next save diffs against it.
+        if (window.RBAC && typeof window.RBAC.refreshSnapshot === 'function') {
+          window.RBAC.refreshSnapshot();
+        }
+
+        // Re-render the active view on any relevant remote change. Most views
+        // aggregate several collections, so refresh broadly (coalesced to one
+        // render per animation frame to absorb the initial multi-collection burst).
+        scheduleRemoteRefresh();
+      },
+      error => {
+        console.error(`Listener error for ${collectionName}:`, error);
+      }
+    );
+
+    listeners.set(collectionName, unsubscribe);
+  });
+
+  console.log('✓ Real-time listeners active');
+}
+
+/**
+ * Clean up listeners
+ */
+export function cleanupListeners() {
+  listeners.forEach(unsubscribe => unsubscribe());
+  listeners.clear();
+  console.log('✓ Listeners cleaned up');
+}
+
+/**
+ * One-time migration: push the current LOCAL data (localStorage / in-memory DB)
+ * up to Firestore so existing records appear in the cloud and start syncing.
+ * Requires Firebase Auth (request.auth) — the security rules reject anonymous
+ * writes. Derived collections (journals, accountsChart) are skipped; each device
+ * regenerates them via GL.reconcileAll. Calls onProgress({collection, written}).
+ * Returns the number of documents written.
+ */
+export async function migrateLocalToFirestore(onProgress) {
+  if (!isFirebaseConfigured || !firestore) {
+    throw new Error('Firebase belum dikonfigurasi (cek .env).');
+  }
+
+  // Source priority:
+  // 1. IndexedDB/localStorage erp_db_v1 (normal first-time migration)
+  // 2. In-memory DB             (last resort)
+  let source = DB;
+  try {
+    const saved = await readLocalSaved();
+    if (saved) {
+      source = saved;
+      console.log('[Migrate] Source: local store');
+    } else {
+      console.log('[Migrate] Source: in-memory DB');
+    }
+  } catch (_) {
+    source = DB;
+  }
+
+  let written = 0;
+  const report = (name, phase) => {
+    if (typeof onProgress === 'function') {
+      try {
+        onProgress({ collection: name, written, phase: phase || 'writing' });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  };
+
+  for (const collectionName of Object.values(COLLECTIONS)) {
+    // ── Phase 1: wipe existing docs so a re-scrape doesn't leave stale IDs ──
+    report(collectionName, 'clearing');
+    try {
+      const existingSnap = await getDocs(collection(firestore, collectionName));
+      if (!existingSnap.empty) {
+        const refs = [];
+        existingSnap.forEach(d => refs.push(d.ref));
+        for (let i = 0; i < refs.length; i += 450) {
+          const delBatch = writeBatch(firestore);
+          refs.slice(i, i + 450).forEach(ref => delBatch.delete(ref));
+          await delBatch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('[Migrate] Could not clear', collectionName, ':', e.message);
+    }
+
+    // ── Phase 2: write new data ───────────────────────────────────────────────
+    const data = source[collectionName];
+    if (data == null) {
+      continue;
+    }
+
+    // Object collections → single 'default' document.
+    if (isObjectCollection(collectionName)) {
+      if (typeof data !== 'object' || Array.isArray(data)) {
+        continue;
+      }
+      await setDoc(
+        doc(firestore, collectionName, 'default'),
+        { ...data, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      written++;
+      report(collectionName, 'writing');
+      continue;
+    }
+
+    // Array collections → one doc per item, batched (Firestore limit 500/batch).
+    if (!Array.isArray(data) || data.length === 0) {
+      continue;
+    }
+    let batch = writeBatch(firestore);
+    let ops = 0;
+    for (const item of data) {
+      if (!item || item.id == null) {
+        continue;
+      }
+      batch.set(
+        doc(firestore, collectionName, String(item.id)),
+        { ...item, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      ops++;
+      written++;
+      if (ops >= 450) {
+        await batch.commit();
+        report(collectionName, 'writing');
+        batch = writeBatch(firestore);
+        ops = 0;
+      }
+    }
+    if (ops > 0) {
+      await batch.commit();
+      report(collectionName, 'writing');
+    }
+  }
+
+  // Record which dataset version Firestore now holds (informational; the old
+  // deployed-JSON reseed check that read this was removed with accurate-data.json).
+  try {
+    await setDoc(doc(firestore, 'meta', 'dataset'), {
+      version: Number(source._version) || 0,
+      migratedAt: source._migratedAt || '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('[Migrate] Could not record meta/dataset:', e.message);
+  }
+
+  // Make the next load use Firestore instead of the cached "unavailable" path.
+  try {
+    localStorage.removeItem(FS_FAIL_KEY);
+  } catch (_) {
+    /* ignore */
+  }
+  return written;
+}
+
+/**
+ * Get default value for a collection
+ */
+function getDefaultValue(key) {
+  const defaults = {
+    accounts: { cash: 0, bca: 0, mandiri: 0 },
+    reservations: {},
+    settings: {
+      user: {
+        name: 'Admin',
+        initials: 'AD',
+        role: 'Administrator',
+        access: 'Full Access',
+      },
+      company: {
+        name: 'Nusantara ERP',
+        address: 'Jl. Contoh No. 1, Jakarta, Indonesia',
+        phone: '',
+      },
+      tax: {
+        pkp: true,
+        npwp: '',
+        ppnRate: 0.11,
+        pphRate: 0,
+        rounding: 'round',
+      },
+      users: [],
+      itemCategories: ['Umum', 'ATK', 'Elektronik', 'Bahan Baku'],
+      units: ['pcs', 'box', 'unit', 'rim', 'roll', 'kg'],
+      assetCategories: ['Bangunan', 'Kendaraan', 'Peralatan'],
+      assetFiscalCategories: ['Golongan 1', 'Golongan 2', 'Golongan 3'],
+      assets: [],
+      assetTransfers: [],
+      assetDisposals: [],
+    },
+  };
+  return defaults[key] || {};
+}
+
+/**
+ * Apply default values for missing data
+ */
+function applyDefaults() {
+  // Keys must match the camelCase collection names used throughout the app.
+  if (!DB.salesOrders) {
+    DB.salesOrders = [];
+  }
+  if (!DB.purchaseOrders) {
+    DB.purchaseOrders = [];
+  }
+  if (!DB.inventoryItems) {
+    DB.inventoryItems = [];
+  }
+  if (!DB.deliveryOrders) {
+    DB.deliveryOrders = [];
+  }
+  if (!DB.customers) {
+    DB.customers = [];
+  }
+  if (!DB.suppliers) {
+    DB.suppliers = [];
+  }
+  if (!DB.paymentLogs) {
+    DB.paymentLogs = [];
+  }
+  if (!DB.notifications) {
+    DB.notifications = [];
+  }
+  if (!DB.fleet) {
+    DB.fleet = [];
+  }
+  if (!DB.expedition) {
+    DB.expedition = [];
+  }
+  if (!DB.accounts) {
+    DB.accounts = getDefaultValue('accounts');
+  }
+  if (!DB.reservations) {
+    DB.reservations = getDefaultValue('reservations');
+  }
+  // Dashboard chart seed arrays. Seeded in normalizeImportedDB on the local path,
+  // but the Firestore path skips that — seed here so the dashboard's empty-state
+  // charts (revenueData.find, etc.) don't crash when Firestore has no data yet.
+  if (!Array.isArray(DB.revenueData)) {
+    DB.revenueData = [];
+  }
+  if (!Array.isArray(DB.topProducts)) {
+    DB.topProducts = [];
+  }
+  if (!Array.isArray(DB.accountsTrend)) {
+    DB.accountsTrend = [];
+  }
+  // V4: per-doc-type numbering registry (PREFIX.YYYY.MM.NNNNN). Seeded empty;
+  // DocEngine.nextNumber() populates it lazily. Additive — nothing reads it yet
+  // except the opt-in engine. See docs/ARCHITECTURE_ERP_V4.md.
+  if (
+    !DB.numberSequences ||
+    typeof DB.numberSequences !== 'object' ||
+    Array.isArray(DB.numberSequences)
+  ) {
+    DB.numberSequences = {};
+  }
+  // Phase 2a/3a GL + costing collections.
+  if (!Array.isArray(DB.accountsChart)) {
+    DB.accountsChart = [];
+  }
+  if (!Array.isArray(DB.journals)) {
+    DB.journals = [];
+  }
+  // journals (Accurate-sourced JVs, _accurateId) + accountsChart now come from
+  // the auth-gated glSeed collection via loadGlSeed() (Firestore mode), or from
+  // the persisted local snapshot (local mode). Nothing to supplement here.
+  if (!Array.isArray(DB.itemAdjustments)) {
+    DB.itemAdjustments = [];
+  }
+  // Phase 4: invoice & receipt doc types.
+  if (!Array.isArray(DB.salesInvoices)) {
+    DB.salesInvoices = [];
+  }
+  if (!Array.isArray(DB.purchaseInvoices)) {
+    DB.purchaseInvoices = [];
+  }
+  if (!Array.isArray(DB.salesReceipts)) {
+    DB.salesReceipts = [];
+  }
+  if (!Array.isArray(DB.purchasePayments)) {
+    DB.purchasePayments = [];
+  }
+  if (!DB.settings) {
+    DB.settings = getDefaultValue('settings');
+  }
+  if (!DB.settings.tax) {
+    DB.settings.tax = getDefaultValue('settings').tax;
+  }
+  if (!Array.isArray(DB.settings.users)) {
+    DB.settings.users = [];
+  }
+  if (!Array.isArray(DB.settings.itemCategories)) {
+    DB.settings.itemCategories = getDefaultValue('settings').itemCategories;
+  }
+  if (!Array.isArray(DB.settings.units)) {
+    DB.settings.units = getDefaultValue('settings').units;
+  }
+  if (!Array.isArray(DB.settings.assetCategories)) {
+    DB.settings.assetCategories = getDefaultValue('settings').assetCategories;
+  }
+  if (!Array.isArray(DB.settings.assetFiscalCategories)) {
+    DB.settings.assetFiscalCategories = getDefaultValue('settings').assetFiscalCategories;
+  }
+  if (!Array.isArray(DB.settings.assets)) {
+    DB.settings.assets = [];
+  }
+  if (!Array.isArray(DB.settings.assetTransfers)) {
+    DB.settings.assetTransfers = [];
+  }
+  if (!Array.isArray(DB.settings.assetDisposals)) {
+    DB.settings.assetDisposals = [];
+  }
+  // Budget & GL extras
+  if (!Array.isArray(DB.budgets)) {
+    DB.budgets = [];
+  }
+  if (!Array.isArray(DB.budgetTransfers)) {
+    DB.budgetTransfers = [];
+  }
+  if (!Array.isArray(DB.expenseAccruals)) {
+    DB.expenseAccruals = [];
+  }
+  if (!Array.isArray(DB.employees)) {
+    DB.employees = [];
+  }
+  if (!Array.isArray(DB.payrollRuns)) {
+    DB.payrollRuns = [];
+  }
+  // Sales & Purchase extras
+  if (!Array.isArray(DB.salesDownPayments)) {
+    DB.salesDownPayments = [];
+  }
+  if (!Array.isArray(DB.purchaseDownPayments)) {
+    DB.purchaseDownPayments = [];
+  }
+  if (!Array.isArray(DB.salesTargets)) {
+    DB.salesTargets = [];
+  }
+  if (!Array.isArray(DB.goodsReceipts)) {
+    DB.goodsReceipts = [];
+  }
+  if (!Array.isArray(DB.supplierPrices)) {
+    DB.supplierPrices = [];
+  }
+
+  if (DB.settings.users.length === 0 && DB.settings.user && DB.settings.user.name) {
+    DB.settings.users = [
+      {
+        id: 'USR-001',
+        name: DB.settings.user.name,
+        email: DB.settings.user.email || 'admin@nusantara.local',
+        role: DB.settings.user.role || 'Administrator',
+      },
+    ];
+  }
+
+  // NOTE: SO/PO status is owned by the sync script (Phase 4, from Accurate's
+  // authoritative statusName). The runtime DO-linkage derivation below is kept
+  // for Option B but is NOT called automatically — it disagrees with Accurate
+  // on ~62% of SOs today (DO qty/itemId don't reconcile), and auto-running it
+  // here silently overwrote Accurate's statuses on every load. Re-enable only
+  // once linkage agreement is high enough (see the diagnostic in
+  // scripts/sync-from-accurate.cjs).
+
+  // Sync the module-local DB variable back to window.DB so classic <script>
+  // code (dashboard.js, erp-view.js, gl.js, etc.) sees the same data.
+  syncDBGlobal();
+}
+
+// Option B (dormant): derive SO/PO status from DO/GR linkage instead of
+// Accurate's reported status. NOT called automatically — Accurate is the
+// current source of truth (see applyDefaults). Exposed as window.deriveOrderStatuses
+// for manual/diagnostic use and as the eventual cutover point once DO qty data
+// reconciles with SO lines. Re-deriving only when all orders share one status
+// is a guard against the old broken migration mapping.
+// Tolerance for comparing summed decimal quantities (see the epsilon note in
+// the SO loop below). 0.01 absorbs float drift without masking a real shortfall
+// (the smallest real partial in the data is whole units short).
+const QTY_EPSILON = 0.01;
+
+function _deriveOrderStatuses() {
+  const orders = (DB.salesOrders || []).filter(function (o) {
+    return o._type === 'order';
+  });
+  if (orders.length === 0) {
+    return;
+  }
+  const statuses = {};
+  orders.forEach(function (o) {
+    statuses[o.status] = (statuses[o.status] || 0) + 1;
+  });
+  // Only re-derive if all orders share one status (the old broken mapping).
+  if (Object.keys(statuses).length > 1) {
+    return;
+  }
+
+  const doQty = {};
+  (DB.deliveryOrders || []).forEach(function (d) {
+    if (!d.soId) {
+      return;
+    }
+    const qty = (d.items || d.lines || []).reduce(function (s, l) {
+      return s + (Number(l.qty) || 0);
+    }, 0);
+    doQty[d.soId] = (doQty[d.soId] || 0) + qty;
+  });
+
+  orders.forEach(function (o) {
+    const ordered = (o.lines || []).reduce(function (s, l) {
+      return s + (Number(l.qty) || 0);
+    }, 0);
+    const delivered = doQty[o.id] || 0;
+    // EPSILON: decimal stone quantities (m³/ton like 512.5) accumulate
+    // floating-point error, so a fully-delivered SO reads 1127.9999998 vs
+    // 1128 ordered. Without tolerance these flip to "Partially Processed" and
+    // disagree with Accurate (8 SOs ≈ 4% of agreement).
+    if (delivered <= QTY_EPSILON) {
+      o.status = 'Waiting on Process';
+    } else if (delivered >= ordered - QTY_EPSILON) {
+      o.status = 'Processed';
+    } else {
+      o.status = 'Partially Processed';
+    }
+  });
+
+  // Same for purchase orders
+  const pos = (DB.purchaseOrders || []).filter(function (o) {
+    return o._type === 'order';
+  });
+  if (pos.length === 0) {
+    return;
+  }
+  const poStatuses = {};
+  pos.forEach(function (o) {
+    poStatuses[o.status] = (poStatuses[o.status] || 0) + 1;
+  });
+  if (Object.keys(poStatuses).length > 1) {
+    return;
+  }
+
+  const grQty = {};
+  (DB.goodsReceipts || []).forEach(function (r) {
+    if (!r.poId) {
+      return;
+    }
+    const qty = (r.items || r.lines || []).reduce(function (s, l) {
+      return s + (Number(l.qty) || 0);
+    }, 0);
+    grQty[r.poId] = (grQty[r.poId] || 0) + qty;
+  });
+
+  pos.forEach(function (o) {
+    const ordered = (o.lines || []).reduce(function (s, l) {
+      return s + (Number(l.qty) || 0);
+    }, 0);
+    const received = grQty[o.id] || 0;
+    if (received <= QTY_EPSILON) {
+      o.status = 'Waiting on Process';
+    } else if (received >= ordered - QTY_EPSILON) {
+      o.status = 'Processed';
+    } else {
+      o.status = 'Partially Processed';
+    }
+  });
+}
+
+/**
+ * Reset database to default data
+ */
+export async function resetDB() {
+  if (
+    !confirm('Apakah Anda yakin ingin mereset semua data? Tindakan ini tidak dapat dibatalkan.')
+  ) {
+    return;
+  }
+
+  // Local-first mode: just reseed defaults and persist locally.
+  if (usingLocalStore) {
+    DB = normalizeImportedDB(defaultData);
+    applyDefaults();
+    persistLocal();
+    if (typeof navigate !== 'undefined' && typeof activeView !== 'undefined') {
+      navigate(activeView);
+    }
+    showToast('Data berhasil direset', 'success');
+    return;
+  }
+
+  try {
+    // Delete all documents in all collections (chunked — 500-op batch limit)
+    for (const collectionName of Object.values(COLLECTIONS)) {
+      const snapshot = await getDocs(collection(firestore, collectionName));
+      const refs = [];
+      snapshot.forEach(doc => {
+        refs.push(doc.ref);
+      });
+      for (let i = 0; i < refs.length; i += 450) {
+        const batch = writeBatch(firestore);
+        refs.slice(i, i + 450).forEach(ref => batch.delete(ref));
+        await batch.commit();
+      }
+    }
+
+    // Reload with defaults
+    DB = normalizeImportedDB(defaultData);
+    syncDBGlobal();
+    // The server was just wiped — clear the dirty-tracking baseline so the
+    // full default dataset is written, not just what differs from pre-reset.
+    _savedSnapshot.clear();
+    await saveDB();
+
+    if (typeof navigate !== 'undefined' && typeof activeView !== 'undefined') {
+      navigate(activeView);
+    }
+
+    showToast('Data berhasil direset', 'success');
+  } catch (error) {
+    console.error('Failed to reset database:', error);
+    showToast('Gagal mereset data', 'danger');
+  }
+}
+
+/**
+ * Normalize imported data structure
+ */
+function normalizeImportedDB(raw) {
+  const clone = v => JSON.parse(JSON.stringify(v));
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const data = clone(input);
+
+  Object.keys(defaultData).forEach(key => {
+    if (!(key in data)) {
+      data[key] = clone(defaultData[key]);
+    }
+  });
+
+  const arrayKeys = [
+    'salesOrders',
+    'purchaseOrders',
+    'inventoryItems',
+    'deliveryOrders',
+    'notifications',
+    'customers',
+    'suppliers',
+    'revenueData',
+    'topProducts',
+    'accountsTrend',
+    'fleet',
+    'expedition',
+    'paymentLogs',
+  ];
+
+  arrayKeys.forEach(key => {
+    if (!Array.isArray(data[key])) {
+      data[key] = clone(defaultData[key] || []);
+    }
+  });
+
+  if (!data.accounts || typeof data.accounts !== 'object' || Array.isArray(data.accounts)) {
+    data.accounts = clone(defaultData.accounts || { cash: 0, bca: 0, mandiri: 0 });
+  } else {
+    data.accounts = { ...(defaultData.accounts || {}), ...data.accounts };
+  }
+
+  if (
+    !data.reservations ||
+    typeof data.reservations !== 'object' ||
+    Array.isArray(data.reservations)
+  ) {
+    data.reservations = {};
+  }
+
+  return data;
+}
+
+// Default data structure
+// ── Demo seed data ───────────────────────────────────────────────────────────
+// Small, obviously-generic dataset so every screen is populated on first run.
+// Carries NO real business records. The chart of accounts is auto-seeded by
+// window.GL.ensureChart() (generic Indonesian CoA), so it stays empty here.
+const _seedCustomers = [
+  {
+    id: 1,
+    name: 'CV Mitra Sejahtera',
+    phone: '021-5550101',
+    address: 'Jakarta',
+    email: 'order@mitrasejahtera.example',
+    npwp: '',
+  },
+  {
+    id: 2,
+    name: 'PT Andalan Niaga',
+    phone: '021-5550102',
+    address: 'Bandung',
+    email: 'po@andalanniaga.example',
+    npwp: '',
+  },
+  {
+    id: 3,
+    name: 'Toko Berkah Jaya',
+    phone: '021-5550103',
+    address: 'Surabaya',
+    email: 'berkah@example.com',
+    npwp: '',
+  },
+];
+
+const _seedSuppliers = [
+  {
+    id: 1,
+    name: 'PT Sumber Makmur',
+    contact: 'Budi',
+    phone: '021-5560201',
+    address: 'Tangerang',
+    npwp: '',
+  },
+  {
+    id: 2,
+    name: 'CV Karya Abadi',
+    contact: 'Sari',
+    phone: '021-5560202',
+    address: 'Bekasi',
+    npwp: '',
+  },
+  { id: 3, name: 'UD Sentosa', contact: 'Adi', phone: '021-5560203', address: 'Depok', npwp: '' },
+];
+
+const _seedItems = [
+  {
+    id: 1,
+    name: 'Kertas A4 80gsm',
+    category: 'ATK',
+    unit: 'rim',
+    stock: 150,
+    min: 20,
+    cost: 45000,
+    sell: 58000,
+    warehouseStock: { 'WH-DEFAULT': 150 },
+  },
+  {
+    id: 2,
+    name: 'Tinta Printer Hitam',
+    category: 'ATK',
+    unit: 'pcs',
+    stock: 80,
+    min: 15,
+    cost: 85000,
+    sell: 110000,
+    warehouseStock: { 'WH-DEFAULT': 80 },
+  },
+  {
+    id: 3,
+    name: 'Kabel UTP Cat6 (roll)',
+    category: 'Elektronik',
+    unit: 'roll',
+    stock: 40,
+    min: 10,
+    cost: 650000,
+    sell: 820000,
+    warehouseStock: { 'WH-DEFAULT': 40 },
+  },
+  {
+    id: 4,
+    name: 'Lampu LED 12W',
+    category: 'Elektronik',
+    unit: 'pcs',
+    stock: 200,
+    min: 30,
+    cost: 22000,
+    sell: 32000,
+    warehouseStock: { 'WH-DEFAULT': 200 },
+  },
+  {
+    id: 5,
+    name: 'Karton Box Packing',
+    category: 'Bahan Baku',
+    unit: 'pcs',
+    stock: 500,
+    min: 50,
+    cost: 5000,
+    sell: 8000,
+    warehouseStock: { 'WH-DEFAULT': 500 },
+  },
+];
+
+const _seedSalesOrders = [
+  {
+    id: 1,
+    number: undefined,
+    customer: 'CV Mitra Sejahtera',
+    customerId: 1,
+    date: '2026-06-01',
+    dueDate: '2026-07-01',
+    status: 'Draft',
+    taxRate: 0.11,
+    tax: 239800,
+    amount: 2419800,
+    stockMutated: false,
+    lines: [
+      {
+        itemId: 1,
+        itemName: 'Kertas A4 80gsm',
+        unit: 'rim',
+        qty: 10,
+        price: 58000,
+        lineDiscount: 0,
+        subtotal: 580000,
+      },
+      {
+        itemId: 4,
+        itemName: 'Lampu LED 12W',
+        unit: 'pcs',
+        qty: 50,
+        price: 32000,
+        lineDiscount: 0,
+        subtotal: 1600000,
+      },
+    ],
+  },
+  {
+    id: 2,
+    number: undefined,
+    customer: 'PT Andalan Niaga',
+    customerId: 2,
+    date: '2026-06-05',
+    dueDate: '2026-07-05',
+    status: 'Confirmed',
+    taxRate: 0.11,
+    tax: 451000,
+    amount: 4551000,
+    stockMutated: false,
+    lines: [
+      {
+        itemId: 3,
+        itemName: 'Kabel UTP Cat6 (roll)',
+        unit: 'roll',
+        qty: 5,
+        price: 820000,
+        lineDiscount: 0,
+        subtotal: 4100000,
+      },
+    ],
+  },
+];
+
+const _seedPurchaseOrders = [
+  {
+    id: 1,
+    number: undefined,
+    supplier: 'PT Sumber Makmur',
+    supplierId: 1,
+    date: '2026-06-02',
+    status: 'Draft',
+    taxRate: 0.11,
+    tax: 660000,
+    amount: 6660000,
+    stockMutated: false,
+    lines: [
+      {
+        itemId: 1,
+        itemName: 'Kertas A4 80gsm',
+        unit: 'rim',
+        qty: 100,
+        price: 45000,
+        lineDiscount: 0,
+        subtotal: 4500000,
+      },
+      {
+        itemId: 5,
+        itemName: 'Karton Box Packing',
+        unit: 'pcs',
+        qty: 300,
+        price: 5000,
+        lineDiscount: 0,
+        subtotal: 1500000,
+      },
+    ],
+  },
+];
+
+const _seedDeliveryOrders = [
+  {
+    id: 1,
+    number: undefined,
+    soId: 1,
+    poId: null,
+    customer: 'CV Mitra Sejahtera',
+    customerId: 1,
+    supplierId: null,
+    destination: 'Jakarta',
+    date: '2026-06-03',
+    status: 'Delivered',
+    driver: 'Andi',
+    vehicle: 'B 1234 XYZ',
+    customerPO: '',
+    notes: '',
+    lines: [
+      {
+        itemId: 1,
+        itemName: 'Kertas A4 80gsm',
+        unit: 'rim',
+        qty: 10,
+        price: 58000,
+        lineDiscount: 0,
+        subtotal: 580000,
+      },
+      {
+        itemId: 4,
+        itemName: 'Lampu LED 12W',
+        unit: 'pcs',
+        qty: 50,
+        price: 32000,
+        lineDiscount: 0,
+        subtotal: 1600000,
+      },
+    ],
+  },
+];
+
+const _seedSalesInvoices = [
+  {
+    id: 1,
+    number: undefined,
+    soId: 2,
+    customer: 'PT Andalan Niaga',
+    customerId: 2,
+    date: '2026-06-06',
+    dueDate: '2026-07-06',
+    status: 'Unpaid',
+    taxRate: 0.11,
+    tax: 451000,
+    amount: 4551000,
+    paid: 0,
+    lines: [
+      {
+        itemId: 3,
+        itemName: 'Kabel UTP Cat6 (roll)',
+        unit: 'roll',
+        qty: 5,
+        price: 820000,
+        lineDiscount: 0,
+        subtotal: 4100000,
+      },
+    ],
+  },
+];
+
+const defaultData = {
+  salesOrders: _seedSalesOrders,
+  purchaseOrders: _seedPurchaseOrders,
+  inventoryItems: _seedItems,
+  deliveryOrders: _seedDeliveryOrders,
+  customers: _seedCustomers,
+  suppliers: _seedSuppliers,
+  paymentLogs: [],
+  notifications: [],
+  fleet: [],
+  expedition: [],
+  warehouses: [{ id: 'WH-DEFAULT', name: 'Gudang Utama', location: 'Default', active: true }],
+  itemTransfers: [],
+  accounts: { cash: 0, bca: 0, mandiri: 0 },
+  reservations: {},
+  numberSequences: {},
+  accountsChart: [],
+  journals: [],
+  itemAdjustments: [],
+  salesInvoices: _seedSalesInvoices,
+  purchaseInvoices: [],
+  salesReceipts: [],
+  purchasePayments: [],
+  settings: getDefaultValue('settings'),
+};
+
+// Clean up on page unload — push any debounced save out before the listeners go.
+window.addEventListener('beforeunload', () => {
+  try {
+    flushPendingSaves();
+  } catch (_) {
+    /* ignore */
+  }
+  cleanupListeners();
+});
+
+// Export for global access
+window.loadDB = loadDB;
+window.saveDB = saveDB;
+window.resetDB = resetDB;
+window.migrateLocalToFirestore = migrateLocalToFirestore;
+// Dormant Option-B helper: derive SO/PO statuses from DO/GR linkage on demand.
+window.deriveOrderStatuses = _deriveOrderStatuses;
