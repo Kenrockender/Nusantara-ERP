@@ -209,6 +209,50 @@ function persistLocal() {
   return true;
 }
 
+/** Whether demo seeding is enabled (default on; set VITE_SEED_DEMO=false to disable). */
+function _demoSeedEnabled() {
+  try {
+    return import.meta.env.VITE_SEED_DEMO !== 'false';
+  } catch (_) {
+    return true;
+  }
+}
+
+/**
+ * Seed the generic dummy dataset into an empty (first-run) Firestore database and
+ * persist it, so a fresh cloud deploy starts populated just like local mode.
+ * No-op when the DB already has data or seeding is disabled.
+ */
+async function seedDemoIfEmpty() {
+  if (!_demoSeedEnabled()) {
+    return false;
+  }
+  const empty = !(
+    (DB.customers || []).length ||
+    (DB.inventoryItems || []).length ||
+    (DB.salesOrders || []).length
+  );
+  if (!empty) {
+    return false;
+  }
+  const clone = v => JSON.parse(JSON.stringify(v));
+  Object.keys(defaultData).forEach(key => {
+    if (Array.isArray(defaultData[key]) && !(DB[key] && DB[key].length)) {
+      DB[key] = clone(defaultData[key]);
+    }
+  });
+  syncDBGlobal();
+  try {
+    // Persist the freshly seeded collections to Firestore (dirty vs the empty
+    // baseline just taken), so the data survives reloads on the deployed site.
+    await saveDB();
+    console.warn('[DB] Seeded demo dataset into empty Firestore database');
+  } catch (e) {
+    console.warn('[DB] Demo seed persist failed (kept in memory):', e);
+  }
+  return true;
+}
+
 /**
  * Initialize database - Load all collections from Firestore
  */
@@ -280,6 +324,12 @@ export async function loadDB() {
     // Everything in memory now matches Firestore — baseline the dirty tracker
     // so the first saveDB() only writes records changed after this point.
     rebaselineSaved();
+
+    // First-run demo seed: if the cloud database is empty, populate it with the
+    // generic dummy dataset (and persist to Firestore) so every screen — and the
+    // "Kesiapan Data Perusahaan" checklist — is filled on a fresh deploy too, not
+    // just in local mode. Disable by setting VITE_SEED_DEMO=false.
+    await seedDemoIfEmpty();
 
     // Set up real-time listeners
     setupRealtimeListeners();
@@ -925,7 +975,7 @@ function getDefaultValue(key) {
       company: {
         name: 'Nusantara ERP',
         address: 'Jl. Contoh No. 1, Jakarta, Indonesia',
-        phone: '',
+        phone: '+62 21 1234 5678',
       },
       tax: {
         pkp: true,

@@ -50,14 +50,18 @@ function _chunk(arr, n) {
 
 // Shared tab-bar markup (Dashboard / Company Data Preparation + "+ Widget").
 function _dashTabsHtml(active) {
+  // The onboarding tab disappears once company data is fully prepared.
+  var showPrep = !_companyPrepComplete();
   return (
     '<div class="dash-tabs">' +
     '<button class="dash-tab' +
     (active === 'dashboard' ? ' active' : '') +
     '" data-action="dashTab" data-id="dashboard">Dashboard</button>' +
-    '<button class="dash-tab' +
-    (active === 'company-prep' ? ' active' : '') +
-    '" data-action="dashTab" data-id="company-prep">Company Data Preparation</button>' +
+    (showPrep
+      ? '<button class="dash-tab' +
+        (active === 'company-prep' ? ' active' : '') +
+        '" data-action="dashTab" data-id="company-prep">Company Data Preparation</button>'
+      : '') +
     '<div class="dash-tab-right">' +
     '<button class="widget-add-btn" data-action="addWidget">+ Widget</button>' +
     '</div>' +
@@ -344,24 +348,39 @@ function _dashYTDPeriod(offset) {
 }
 
 // ── Company Data Preparation tab content ─────────────────────────────────────
-function _renderCompanyPrep() {
+// Shared checklist so the tab visibility and the panel stay in sync.
+function _companyPrepChecks() {
   var c = (DB.settings && DB.settings.company) || {};
   var u = (DB.settings && DB.settings.user) || {};
-  var checks = [
+  // ensureChart() returns the (auto-seeded) chart of accounts; fall back to the
+  // raw collection. The old check read GL.accounts, which never exists.
+  var chart =
+    typeof GL !== 'undefined' && typeof GL.ensureChart === 'function'
+      ? GL.ensureChart()
+      : DB.accountsChart || [];
+  return [
     { label: 'Nama Perusahaan', ok: !!c.name, action: 'editIdentity' },
     { label: 'Alamat Perusahaan', ok: !!c.address, action: 'editIdentity' },
     { label: 'Telepon Perusahaan', ok: !!c.phone, action: 'editIdentity' },
     { label: 'Nama Pengguna', ok: !!u.name, action: 'editIdentity' },
     { label: 'Jabatan / Peran', ok: !!u.role, action: 'editIdentity' },
     { label: 'Mata Uang Default', ok: true },
-    {
-      label: 'Chart of Accounts',
-      ok: typeof GL !== 'undefined' && GL.accounts && GL.accounts.length > 0,
-    },
-    { label: 'Data Pelanggan', ok: DB.customers && DB.customers.length > 0 },
-    { label: 'Data Supplier', ok: DB.suppliers && DB.suppliers.length > 0 },
-    { label: 'Data Produk / Item', ok: DB.inventoryItems && DB.inventoryItems.length > 0 },
+    { label: 'Chart of Accounts', ok: !!(chart && chart.length > 0) },
+    { label: 'Data Pelanggan', ok: !!(DB.customers && DB.customers.length > 0) },
+    { label: 'Data Supplier', ok: !!(DB.suppliers && DB.suppliers.length > 0) },
+    { label: 'Data Produk / Item', ok: !!(DB.inventoryItems && DB.inventoryItems.length > 0) },
   ];
+}
+
+// True once every preparation item is satisfied — used to hide the onboarding tab.
+function _companyPrepComplete() {
+  return _companyPrepChecks().every(function (c) {
+    return c.ok;
+  });
+}
+
+function _renderCompanyPrep() {
+  var checks = _companyPrepChecks();
   var done = checks.filter(function (c) {
     return c.ok;
   }).length;
@@ -421,7 +440,11 @@ function renderDashboard() {
     label: '1 Jan - ' + period.endDay + ' ' + period.monthName + ' ' + period.year,
   };
 
-  // If Company Data Preparation tab is active, show that instead
+  // If Company Data Preparation tab is active, show that instead — unless data is
+  // already complete, in which case the tab is gone and we fall back to Dashboard.
+  if (_dashActiveTab === 'company-prep' && _companyPrepComplete()) {
+    _dashActiveTab = 'dashboard';
+  }
   if (_dashActiveTab === 'company-prep') {
     return _dashTabsHtml('company-prep') + _renderCompanyPrep();
   }
