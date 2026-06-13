@@ -29,8 +29,12 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+    // Email verification is NOT required (single-tenant app; the owner controls
+    // who has accounts and public sign-up is disabled). Writes are still gated by
+    // role/ownership below. To re-enable, restore:
+    //   return signedIn() && request.auth.token.email_verified == true;
     function verified() {
-      return signedIn() && request.auth.token.email_verified == true;
+      return signedIn();
     }
     function bootstrapAdmin() {
       return verified() && request.auth.token.email in ['kenrockender521@gmail.com'];

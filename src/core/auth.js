@@ -305,10 +305,10 @@ export function getAuthMode() {
  * state, which the Firestore security rules require for any write.
  */
 export function isEmailVerified() {
-  if (_activeMode !== 'firebase') {
-    return true;
-  }
-  return !!(fbAuth && fbAuth.currentUser && fbAuth.currentUser.emailVerified);
+  // Email verification is no longer required (the Firestore rules' verified()
+  // helper was relaxed to signedIn()). Always report verified so the cloud-write
+  // gate and the "belum diverifikasi" banner stay out of the way.
+  return true;
 }
 
 /**
