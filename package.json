@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --mode offline",
     "build": "vite build",
+    "build:local": "vite build --mode offline",
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",

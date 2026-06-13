@@ -9,6 +9,13 @@
       "autoPort": true
     },
     {
+      "name": "dev-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:local"],
+      "port": 8088,
+      "autoPort": true
+    },
+    {
       "name": "preview-dist",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "preview", "--", "--port", "4173"],
