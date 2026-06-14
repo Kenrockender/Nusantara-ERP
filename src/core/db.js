@@ -2445,9 +2445,62 @@ const _seedPaymentLogs = [
   },
 ];
 
+// Twelve months of confirmed sales/purchase orders so the dashboard "Tren
+// Bulanan" (12-month) chart shows a real trend instead of a flat line. Dates are
+// computed relative to today; amounts are deterministic (no RNG) for stable builds.
+function _monthlyTrendOrders() {
+  const salesM = [8, 11, 9, 13, 15, 12, 17, 14, 19, 16, 21, 24]; // in millions
+  const purchM = [5, 7, 6, 8, 9, 7, 10, 8, 11, 9, 12, 14];
+  const so = [];
+  const po = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const idx = 11 - i;
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 15);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-15`;
+    const cust = _seedCustomers[idx % _seedCustomers.length];
+    const sup = _seedSuppliers[idx % _seedSuppliers.length];
+    const it = _seedItems[idx % _seedItems.length];
+    const sAmt = salesM[idx] * 1000000;
+    const pAmt = purchM[idx] * 1000000;
+    so.push({
+      id: 100 + idx,
+      number: undefined,
+      customer: cust.name,
+      customerId: cust.id,
+      date,
+      status: 'Confirmed',
+      taxRate: 0,
+      tax: 0,
+      amount: sAmt,
+      stockMutated: false,
+      lines: [
+        { itemId: it.id, itemName: it.name, unit: it.unit, qty: 1, price: sAmt, lineDiscount: 0, subtotal: sAmt },
+      ],
+    });
+    po.push({
+      id: 100 + idx,
+      number: undefined,
+      supplier: sup.name,
+      supplierId: sup.id,
+      date,
+      status: 'Confirmed',
+      taxRate: 0,
+      tax: 0,
+      amount: pAmt,
+      stockMutated: false,
+      lines: [
+        { itemId: it.id, itemName: it.name, unit: it.unit, qty: 1, price: pAmt, lineDiscount: 0, subtotal: pAmt },
+      ],
+    });
+  }
+  return { so, po };
+}
+const _trend = _monthlyTrendOrders();
+
 const defaultData = {
-  salesOrders: _seedSalesOrders,
-  purchaseOrders: _seedPurchaseOrders,
+  salesOrders: _seedSalesOrders.concat(_trend.so),
+  purchaseOrders: _seedPurchaseOrders.concat(_trend.po),
   inventoryItems: _seedItems,
   deliveryOrders: _seedDeliveryOrders,
   customers: _seedCustomers,

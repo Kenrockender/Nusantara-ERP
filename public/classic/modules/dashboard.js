@@ -10,7 +10,7 @@ var DASH_WIDGETS_KEY = 'nsa_dash_widgets_v1';
 var DASH_WIDGET_CATALOG = [
   { id: 'activity', label: 'Aktivitas Terbaru' },
   { id: 'jatuhTempo', label: 'Jatuh Tempo' },
-  { id: 'tren', label: 'Tren Mingguan' },
+  { id: 'tren', label: 'Tren Bulanan' },
   { id: 'labaRugi', label: 'Laba/Rugi Tahun Ini' },
   { id: 'arusKas', label: 'Arus Kas' },
   { id: 'beban', label: 'Beban Perusahaan' },
@@ -691,7 +691,7 @@ function renderDashboard() {
   var _isMobileViewport = typeof window !== 'undefined' && window.innerWidth <= 768;
   var money = _isMobileViewport && typeof idrShort === 'function' ? idrShort : idr;
 
-  // Tren Mingguan summary: this month vs last month penjualan total.
+  // Tren Bulanan summary: this month vs last month penjualan total.
   var _trenThisKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   var _trenLastD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   var _trenLastKey =
@@ -782,7 +782,7 @@ function renderDashboard() {
       attrs: ' data-chart-id="revenue"',
       inner: `
       <div class="widget-header">
-        <div class="widget-title">Tren Mingguan</div>
+        <div class="widget-title">Tren Bulanan (12 bulan)</div>
         <div style="display:flex;gap:12px;align-items:center">
           <div class="donut-label"><div class="donut-label-dot" style="background:#3B82F6"></div> Penjualan</div>
           <div class="donut-label"><div class="donut-label-dot" style="background:#FF9F0A"></div> Pengeluaran</div>
