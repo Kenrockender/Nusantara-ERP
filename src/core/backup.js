@@ -16,13 +16,29 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db as firestore } from '../config/firebase.js';
-import { getCurrentUser } from './auth.js';
+import { getCurrentUser, getAuthMode } from './auth.js';
 
 const BACKUP_COLLECTION = 'backups';
 const BACKUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_BACKUPS = 10; // Keep last 10 backups
 
 let backupTimer = null;
+
+// Set once a cloud backup is rejected with permission-denied (a signed-in but
+// role-less/`pending` Firebase user, by design of the Firestore rules). Stops
+// the 24h timer from re-logging the same denial every cycle — one warning is
+// enough; the data is still safe locally (local-first) and via file export.
+let autoBackupDisabled = false;
+
+// Cloud backups only work with a real Firebase Auth session. A local-fallback
+// login (admin@nusantara.local) or pure offline mode leaves getCurrentUser()
+// truthy but request.auth null, so every Firestore write was rejected with
+// permission-denied. Gate all cloud ops on the active auth backend instead of
+// merely "is someone logged in". Local-first IndexedDB + file backup already
+// protect the data in those modes.
+function cloudBackupAvailable() {
+  return getAuthMode() === 'firebase' && !!firestore;
+}
 
 /**
  * Initialize backup system
@@ -41,21 +57,35 @@ export function initBackup() {
  * Check if backup is needed and create one
  */
 async function checkAndCreateBackup() {
-  try {
-    const user = getCurrentUser();
-    if (!user) {
-      return;
-    }
+  // Skip silently in local/offline mode, or once a denial has disabled it.
+  if (!cloudBackupAvailable() || autoBackupDisabled) {
+    return;
+  }
 
-    const lastBackup = localStorage.getItem('lastBackupTime');
-    const now = Date.now();
+  const user = getCurrentUser();
+  if (!user) {
+    return;
+  }
 
-    if (!lastBackup || now - parseInt(lastBackup) >= BACKUP_INTERVAL) {
+  const lastBackup = localStorage.getItem('lastBackupTime');
+  const now = Date.now();
+
+  if (!lastBackup || now - parseInt(lastBackup) >= BACKUP_INTERVAL) {
+    try {
       await createBackup();
       localStorage.setItem('lastBackupTime', String(now));
+    } catch (error) {
+      // Expected for a signed-in user without a cloud write role (`pending`):
+      // warn once, then stop retrying instead of flooding the console.
+      if (error?.code === 'permission-denied') {
+        autoBackupDisabled = true;
+        console.warn(
+          'Auto-backup cloud dinonaktifkan: akun ini belum punya izin tulis (role belum ditetapkan admin). Data tetap aman secara lokal — gunakan Export ke file bila perlu.'
+        );
+        return;
+      }
+      console.error('Auto-backup failed:', error);
     }
-  } catch (error) {
-    console.error('Auto-backup failed:', error);
   }
 }
 
@@ -70,6 +100,12 @@ const CHUNK_CHARS = 500000;
  */
 async function createBackup() {
   try {
+    if (!cloudBackupAvailable()) {
+      throw new Error(
+        'Backup cloud hanya tersedia saat login cloud (Firebase). Gunakan Export ke file untuk mode lokal.'
+      );
+    }
+
     const user = getCurrentUser();
     if (!user) {
       throw new Error('User not authenticated');
@@ -103,7 +139,8 @@ async function createBackup() {
     console.log(`✓ Backup created: ${backupId} (${chunkCount} chunks, ${formatBytes(size)})`);
     return backupId;
   } catch (error) {
-    console.error('Failed to create backup:', error);
+    // Callers (checkAndCreateBackup / forceBackup) decide how to surface this;
+    // logging here too would double up every failure in the console.
     throw error;
   }
 }
@@ -161,6 +198,10 @@ async function cleanupOldBackups(userId) {
  */
 export async function getBackupList() {
   try {
+    if (!cloudBackupAvailable()) {
+      return [];
+    }
+
     const user = getCurrentUser();
     if (!user) {
       return [];
@@ -199,6 +240,12 @@ export async function getBackupList() {
  */
 export async function restoreFromBackup(backupId) {
   try {
+    if (!cloudBackupAvailable()) {
+      throw new Error(
+        'Restore cloud hanya tersedia saat login cloud (Firebase). Gunakan Import dari file untuk mode lokal.'
+      );
+    }
+
     const docRef = doc(firestore, BACKUP_COLLECTION, backupId);
     const docSnap = await getDoc(docRef);
 
