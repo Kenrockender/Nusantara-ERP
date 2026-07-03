@@ -168,7 +168,7 @@ const TYPES = {
     statuses: STATUS.SO,
     transitions: TRANSITIONS.SO,
     getFrom: ['SQ'],
-    flowsTo: ['DO'],
+    flowsTo: ['DO', 'SI'],
   },
   PO: {
     docType: 'PO',
@@ -182,7 +182,7 @@ const TYPES = {
     statuses: STATUS.PO,
     transitions: TRANSITIONS.PO,
     getFrom: ['PQ'],
-    flowsTo: [],
+    flowsTo: ['DO', 'PI'],
   },
   SI: {
     docType: 'SI',
@@ -210,7 +210,7 @@ const TYPES = {
     statuses: STATUS.PI,
     transitions: TRANSITIONS.PI,
     getFrom: ['PO'],
-    flowsTo: ['PR'],
+    flowsTo: ['PP'],
   },
   SR: {
     docType: 'SR',
@@ -293,7 +293,7 @@ const TYPES = {
     priceField: null,
     statuses: STATUS.DO,
     transitions: TRANSITIONS.DO,
-    getFrom: ['SO'],
+    getFrom: ['SO', 'PO'],
     flowsTo: [],
   },
 };

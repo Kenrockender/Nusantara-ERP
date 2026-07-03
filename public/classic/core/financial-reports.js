@@ -234,14 +234,64 @@
     );
   }
 
-  // ── Profit & Loss (Laba Rugi) ─────────────────────────────────────────────
+  // A subtotal bar (e.g. Gross Profit, Operating Income, Net Income). `level`
+  // 'major' draws the bold boxed total; 'minor' a lighter inline subtotal. An
+  // optional margin % (over revenue) is shown when `base` is provided.
+  function subtotalBar(label, value, level, base) {
+    var color = value >= 0 ? '#34C759' : '#FF3B30';
+    var marginHtml =
+      typeof base === 'number' && base !== 0
+        ? '<span style="font-size:11px;color:var(--muted);font-weight:600;margin-left:10px">' +
+          ((value / base) * 100).toFixed(1) +
+          '% dari pendapatan</span>'
+        : '';
+    if (level === 'major') {
+      return (
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin:4px 0 16px;border:2px solid ' +
+        color +
+        ';border-radius:10px;background:' +
+        color +
+        '10">' +
+        '<span style="font-size:15px;font-weight:800">' +
+        esc(label) +
+        marginHtml +
+        '</span>' +
+        '<span style="font-size:15px;font-weight:800;color:' +
+        color +
+        '">' +
+        money(value) +
+        '</span></div>'
+      );
+    }
+    return (
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">' +
+      '<span style="font-size:13px;font-weight:800">' +
+      esc(label) +
+      marginHtml +
+      '</span>' +
+      '<span style="font-size:13px;font-weight:800;color:' +
+      color +
+      '">' +
+      money(value) +
+      '</span></div>'
+    );
+  }
+
+  // ── Profit & Loss (Laba Rugi) — full multi-step income statement ───────────
   function plTab() {
     var tb = filteredTrialBalance();
     var revenueRows = [];
     var cogsRows = [];
     var expenseRows = [];
+    var taxRows = [];
     var otherIncomeRows = [];
     var otherExpenseRows = [];
+
+    // Income-tax expense is shown on its own line in a standard P&L, so split it
+    // out of operating expenses by account name (Beban Pajak Penghasilan / PPh).
+    var isTaxAccount = function (r) {
+      return /pajak penghasilan|\bpph\b|income tax/i.test(String(r.name || ''));
+    };
 
     tb.rows.forEach(function (r) {
       switch (r.type) {
@@ -252,7 +302,7 @@
           cogsRows.push(r);
           break;
         case 'EXPENSE':
-          expenseRows.push(r);
+          (isTaxAccount(r) ? taxRows : expenseRows).push(r);
           break;
         case 'OTHER_INCOME':
           otherIncomeRows.push(r);
@@ -263,30 +313,28 @@
       }
     });
 
-    var totalRevenue = revenueRows.reduce(function (s, r) {
-      return s + signedBalance(r);
-    }, 0);
-    var totalCOGS = cogsRows.reduce(function (s, r) {
-      return s + signedBalance(r);
-    }, 0);
+    var sum = function (rows) {
+      return rows.reduce(function (s, r) {
+        return s + signedBalance(r);
+      }, 0);
+    };
+
+    var totalRevenue = sum(revenueRows);
+    var totalCOGS = sum(cogsRows);
     var grossProfit = totalRevenue - totalCOGS;
-    var totalExpense = expenseRows.reduce(function (s, r) {
-      return s + signedBalance(r);
-    }, 0);
-    var totalOtherIncome = otherIncomeRows.reduce(function (s, r) {
-      return s + signedBalance(r);
-    }, 0);
-    var totalOtherExpense = otherExpenseRows.reduce(function (s, r) {
-      return s + signedBalance(r);
-    }, 0);
-    var netProfit = grossProfit - totalExpense + totalOtherIncome - totalOtherExpense;
+    var totalExpense = sum(expenseRows);
+    var operatingIncome = grossProfit - totalExpense;
+    var totalOtherIncome = sum(otherIncomeRows);
+    var totalOtherExpense = sum(otherExpenseRows);
+    var incomeBeforeTax = operatingIncome + totalOtherIncome - totalOtherExpense;
+    var totalTax = sum(taxRows);
+    var netProfit = incomeBeforeTax - totalTax;
     var netColor = netProfit >= 0 ? '#34C759' : '#FF3B30';
 
     var stats =
       typeof window.statRow === 'function'
         ? window.statRow([
             { label: 'Pendapatan', value: money(totalRevenue), sub: 'Penjualan bersih' },
-            { label: 'HPP', value: money(totalCOGS), sub: 'Harga pokok penjualan' },
             {
               label: 'Laba Kotor',
               value: money(grossProfit),
@@ -294,9 +342,15 @@
               color: grossProfit >= 0 ? '#34C759' : '#FF3B30',
             },
             {
+              label: 'Laba Usaha',
+              value: money(operatingIncome),
+              sub: 'Setelah beban operasional',
+              color: operatingIncome >= 0 ? '#34C759' : '#FF3B30',
+            },
+            {
               label: 'Laba Bersih',
               value: money(netProfit),
-              sub: 'Setelah beban',
+              sub: 'Setelah pajak',
               color: netColor,
             },
           ])
@@ -305,30 +359,22 @@
     return (
       stats +
       '<div class="card">' +
-      '<div style="font-size:14px;font-weight:700;margin-bottom:14px">Laporan Laba Rugi</div>' +
-      sectionBlock('Pendapatan', revenueRows) +
-      sectionBlock('Harga Pokok Penjualan', cogsRows) +
-      '<div style="display:flex;justify-content:flex-end;padding:8px 10px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">' +
-      '<span style="font-size:13px;font-weight:800">Laba Kotor: <span style="color:' +
-      (grossProfit >= 0 ? '#34C759' : '#FF3B30') +
-      '">' +
-      money(grossProfit) +
-      '</span></span>' +
+      '<div style="font-size:14px;font-weight:700;margin-bottom:4px">Laporan Laba Rugi (Multi-Langkah)</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:14px">' +
+      (periodFrom || periodTo
+        ? 'Periode ' + esc(periodFrom || '…') + ' s/d ' + esc(periodTo || '…')
+        : 'Seluruh periode') +
       '</div>' +
+      sectionBlock('Pendapatan', revenueRows) +
+      sectionBlock('Harga Pokok Penjualan (HPP)', cogsRows) +
+      subtotalBar('Laba Kotor', grossProfit, 'minor', totalRevenue) +
       sectionBlock('Beban Operasional', expenseRows) +
+      subtotalBar('Laba Usaha (Operasional)', operatingIncome, 'minor', totalRevenue) +
       (otherIncomeRows.length > 0 ? sectionBlock('Pendapatan Lain-lain', otherIncomeRows) : '') +
       (otherExpenseRows.length > 0 ? sectionBlock('Beban Lain-lain', otherExpenseRows) : '') +
-      '<div style="display:flex;justify-content:flex-end;padding:12px 14px;border:2px solid ' +
-      netColor +
-      ';border-radius:10px;background:' +
-      netColor +
-      '10">' +
-      '<span style="font-size:15px;font-weight:800">Laba Bersih: <span style="color:' +
-      netColor +
-      '">' +
-      money(netProfit) +
-      '</span></span>' +
-      '</div>' +
+      subtotalBar('Laba Sebelum Pajak', incomeBeforeTax, 'minor', totalRevenue) +
+      sectionBlock('Beban Pajak Penghasilan', taxRows) +
+      subtotalBar('Laba Bersih', netProfit, 'major', totalRevenue) +
       '</div>'
     );
   }

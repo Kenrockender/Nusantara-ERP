@@ -1,0 +1,544 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{ragged2e}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+\definecolor{navy}{HTML}{1F3A5F}
+\definecolor{accent}{HTML}{2E75B6}
+\definecolor{soft}{HTML}{EAF1F8}
+\definecolor{grey}{HTML}{555555}
+\titleformat{\section}{\color{navy}\Large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\color{navy}\large\bfseries}{}{0em}{}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}p}
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\lhead{\small\color{grey}TMA \textbullet{} Contoh Output Laporan}
+\rhead{\small\color{grey}\thepage}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\begin{document}
+\begin{center}
+{\color{navy}\Huge\bfseries Contoh Output Laporan}\\[4pt]
+{\Large\bfseries TMA}\\[6pt]
+{\color{grey} Laporan dihasilkan otomatis oleh sistem dari data transaksi yang tercatat}\\[2pt]
+{\color{grey} Mata uang: Rupiah (IDR) \quad\textbullet\quad Tarif PPN: 11\%}\\[10pt]
+\color{accent}\rule{\linewidth}{1.2pt}
+\end{center}
+\vspace{4pt}
+\tableofcontents
+\newpage
+\section{Laporan Laba Rugi (Multi-Langkah)}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l R{3cm}}
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+Pendapatan & Rp 40.200.000 \\
+Laba Kotor & Rp 9.400.000 \\
+Laba Usaha & Rp 9.400.000 \\
+\textbf{Laba Bersih} & \textbf{Rp 9.400.000} \\
+\end{longtable}}
+
+\subsection{Pendapatan}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+400001 & Penjualan & Rp 40.200.000 \\
+ & \textbf{Total} & \textbf{Rp 40.200.000} \\
+\end{longtable}}
+
+\subsection{Harga Pokok Penjualan (HPP)}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+510101 & Beban Pokok Penjualan & Rp 30.800.000 \\
+ & \textbf{Total} & \textbf{Rp 30.800.000} \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Laba Kotor: Rp 9.400.000 (23.4\% dari pendapatan)}}}\vspace{4pt}
+
+\subsection{Beban Operasional}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+ & \textit{Tidak ada data} & Rp 0 \\
+ & \textbf{Total} & \textbf{Rp 0} \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Laba Usaha (Operasional): Rp 9.400.000 (23.4\% dari pendapatan)}}}\vspace{4pt}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Laba Sebelum Pajak: Rp 9.400.000 (23.4\% dari pendapatan)}}}\vspace{4pt}
+
+\subsection{Beban Pajak Penghasilan}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+ & \textit{Tidak ada data} & Rp 0 \\
+ & \textbf{Total} & \textbf{Rp 0} \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Laba Bersih: Rp 9.400.000 (23.4\% dari pendapatan)}}}\vspace{4pt}
+
+\section{Neraca (Balance Sheet)}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l R{3cm}}
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+Total Aset & Rp 14.399.200 \\
+Total Kewajiban & Rp 4.999.200 \\
+Total Ekuitas & Rp 9.400.000 \\
+\textbf{Status} & \textbf{Seimbang} \\
+\end{longtable}}
+
+\textbf{ASET}
+\subsection{Aset Lancar}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+110101 & Kas & Rp 39.027.600 \\
+110401 & Persediaan Barang & Rp 25.240.000 \\
+130101 & PPN Masukan & Rp 611.600 \\
+ & \textbf{Total Aset Lancar} & \textbf{Rp 14.399.200} \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Total Aset: Rp 14.399.200}}}\vspace{4pt}
+
+\textbf{KEWAJIBAN}
+\subsection{Kewajiban Lancar}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Akun} & \textbf{Nama Akun} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+210101 & Hutang Usaha & Rp 577.200 \\
+210201 & Hutang PPN (PPN Keluaran) & Rp 4.422.000 \\
+ & \textbf{Total Kewajiban Lancar} & \textbf{Rp 4.999.200} \\
+\end{longtable}}
+
+\textbf{EKUITAS}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{3cm}}
+\toprule
+\textbf{} & \textbf{Keterangan} & \textbf{Jumlah} \\
+\midrule\endfirsthead
+\toprule
+\textbf{} & \textbf{Keterangan} & \textbf{Jumlah} \\
+\midrule\endhead
+\bottomrule\endfoot
+ & Laba (Rugi) Periode Berjalan & Rp 9.400.000 \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Total Kewajiban + Ekuitas: Rp 14.399.200 (Seimbang)}}}\vspace{4pt}
+
+\textit{\small Catatan: data contoh ini baru berisi jurnal transaksi (belum ada jurnal saldo awal seperti modal, kas awal, dan persediaan awal), sehingga sebagian akun hanya mencerminkan pergerakan periode. Neraca tetap seimbang karena mesin buku besar bersifat double entry. Setelah saldo awal diinput saat onboarding, angka Neraca tampil utuh.}
+
+\section{Laporan Arus Kas (Cash Flow)}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l R{3cm}}
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Ringkasan} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+Arus Operasional & Rp 39.027.600 \\
+Arus Investasi & Rp 0 \\
+Arus Pendanaan & Rp 0 \\
+\textbf{Arus Kas Bersih} & \textbf{Rp 39.027.600} \\
+\end{longtable}}
+
+\subsection{Aktivitas Operasional}
+Masuk: Rp 44.622.000 \quad Keluar: Rp 5.594.400 \quad Bersih: \textbf{Rp 39.027.600}
+
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l R{2.6cm} R{2.6cm}}
+\toprule
+\textbf{Tanggal} & \textbf{Keterangan} & \textbf{Masuk} & \textbf{Keluar} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Tanggal} & \textbf{Keterangan} & \textbf{Masuk} & \textbf{Keluar} \\
+\midrule\endhead
+\bottomrule\endfoot
+2026-06-06 & PP 1 &  & Rp 5.594.400 \\
+2026-05-24 & SR 1 & Rp 44.622.000 &  \\
+\end{longtable}}
+
+\subsection{Aktivitas Investasi}
+Masuk: Rp 0 \quad Keluar: Rp 0 \quad Bersih: \textbf{Rp 0}
+
+\textit{Tidak ada arus kas pada kategori ini.}
+
+\subsection{Aktivitas Pendanaan}
+Masuk: Rp 0 \quad Keluar: Rp 0 \quad Bersih: \textbf{Rp 0}
+
+\textit{Tidak ada arus kas pada kategori ini.}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Kenaikan (Penurunan) Kas Bersih: Rp 39.027.600}}}\vspace{4pt}
+
+\section{Rekap Sales Order (Penjualan)}
+Total 20 SO, nilai keseluruhan \textbf{Rp 249.823.550}.
+
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l l p{4cm} c R{2.6cm} l}
+\toprule
+\textbf{No. SO} & \textbf{Tanggal} & \textbf{Pelanggan} & \textbf{Item} & \textbf{Nilai} & \textbf{Status} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. SO} & \textbf{Tanggal} & \textbf{Pelanggan} & \textbf{Item} & \textbf{Nilai} & \textbf{Status} \\
+\midrule\endhead
+\bottomrule\endfoot
+SO.2026.06.00002 & 2026-06-15 & PT Cahaya Abadi & 1 & Rp 24.000.000 & Confirmed \\
+SO.2026.06.00007 & 2026-06-13 & UD Sinar Terang & 2 & Rp 4.462.200 & Draft \\
+SO.2026.06.00006 & 2026-06-12 & PT Bintang Timur & 1 & Rp 6.327.000 & Processed \\
+SO.2026.06.00005 & 2026-06-10 & Toko Maju Mundur & 2 & Rp 5.117.100 & Confirmed \\
+SO.2026.06.00004 & 2026-06-08 & CV Sumber Rejeki & 1 & Rp 743.700 & Draft \\
+SO.2026.06.00003 & 2026-06-05 & PT Andalan Niaga & 1 & Rp 371.850 & Confirmed \\
+SO.2026.06.00001 & 2026-06-01 & CV Mitra Sejahtera & 2 & Rp 4.351.200 & Draft \\
+SO.2026.05.00003 & 2026-05-28 & PT Cahaya Abadi & 2 & Rp 4.828.500 & Confirmed \\
+SO.2026.05.00002 & 2026-05-20 & Toko Berkah Jaya & 2 & Rp 44.622.000 & Processed \\
+SO.2026.05.00001 & 2026-05-15 & Toko Berkah Jaya & 1 & Rp 21.000.000 & Confirmed \\
+SO.2026.04.00001 & 2026-04-15 & PT Andalan Niaga & 1 & Rp 16.000.000 & Confirmed \\
+SO.2026.03.00001 & 2026-03-15 & CV Mitra Sejahtera & 1 & Rp 19.000.000 & Confirmed \\
+SO.2026.02.00001 & 2026-02-15 & UD Sinar Terang & 1 & Rp 14.000.000 & Confirmed \\
+SO.2026.01.00001 & 2026-01-15 & PT Bintang Timur & 1 & Rp 17.000.000 & Confirmed \\
+SO.2025.12.00001 & 2025-12-15 & Toko Maju Mundur & 1 & Rp 12.000.000 & Confirmed \\
+SO.2025.11.00001 & 2025-11-15 & CV Sumber Rejeki & 1 & Rp 15.000.000 & Confirmed \\
+SO.2025.10.00001 & 2025-10-15 & PT Cahaya Abadi & 1 & Rp 13.000.000 & Confirmed \\
+SO.2025.09.00001 & 2025-09-15 & Toko Berkah Jaya & 1 & Rp 9.000.000 & Confirmed \\
+SO.2025.08.00001 & 2025-08-15 & PT Andalan Niaga & 1 & Rp 11.000.000 & Confirmed \\
+SO.2025.07.00001 & 2025-07-15 & CV Mitra Sejahtera & 1 & Rp 8.000.000 & Confirmed \\
+ &  & \textbf{TOTAL} &  & \textbf{Rp 249.823.550} &  \\
+\end{longtable}}
+
+\section{Invoice Terhutang (Piutang Usaha)}
+3 faktur belum lunas, total piutang \textbf{Rp 11.527.350}.
+
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l p{3.2cm} l l R{2.4cm} R{2.4cm} l}
+\toprule
+\textbf{No. Inv} & \textbf{Pelanggan} & \textbf{Tanggal} & \textbf{Jatuh Tempo} & \textbf{Nilai} & \textbf{Sisa} & \textbf{Status} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Inv} & \textbf{Pelanggan} & \textbf{Tanggal} & \textbf{Jatuh Tempo} & \textbf{Nilai} & \textbf{Sisa} & \textbf{Status} \\
+\midrule\endhead
+\bottomrule\endfoot
+INV-1 & PT Andalan Niaga & 2026-06-06 & 2026-07-06 & Rp 371.850 & Rp 371.850 & Unpaid \\
+INV-3 & PT Bintang Timur & 2026-06-13 & 2026-07-13 & Rp 6.327.000 & Rp 6.327.000 & Unpaid \\
+INV-4 & PT Cahaya Abadi & 2026-06-01 & 2026-07-01 & Rp 4.828.500 & Rp 4.828.500 & Unpaid \\
+ &  &  &  & \textbf{TOTAL} & \textbf{Rp 11.527.350} &  \\
+\end{longtable}}
+
+\section{Rekap Purchase Order (Pembelian)}
+Total 16 PO, nilai keseluruhan \textbf{Rp 153.019.600}.
+
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l l p{4cm} c R{2.6cm} l}
+\toprule
+\textbf{No. PO} & \textbf{Tanggal} & \textbf{Supplier} & \textbf{Item} & \textbf{Nilai} & \textbf{Status} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. PO} & \textbf{Tanggal} & \textbf{Supplier} & \textbf{Item} & \textbf{Nilai} & \textbf{Status} \\
+\midrule\endhead
+\bottomrule\endfoot
+PO.2026.06.00002 & 2026-06-15 & PT Anugerah Material & 1 & Rp 14.000.000 & Confirmed \\
+PO.2026.06.00004 & 2026-06-09 & PT Anugerah Material & 2 & Rp 10.101.000 & Draft \\
+PO.2026.06.00003 & 2026-06-04 & PT Global Supplindo & 2 & Rp 5.594.400 & Confirmed \\
+PO.2026.06.00001 & 2026-06-02 & PT Sumber Makmur & 2 & Rp 30.747.000 & Draft \\
+PO.2026.05.00002 & 2026-05-25 & CV Karya Abadi & 1 & Rp 577.200 & Received \\
+PO.2026.05.00001 & 2026-05-15 & CV Mandiri Teknik & 1 & Rp 12.000.000 & Confirmed \\
+PO.2026.04.00001 & 2026-04-15 & PT Global Supplindo & 1 & Rp 9.000.000 & Confirmed \\
+PO.2026.03.00001 & 2026-03-15 & UD Sentosa & 1 & Rp 11.000.000 & Confirmed \\
+PO.2026.02.00001 & 2026-02-15 & CV Karya Abadi & 1 & Rp 8.000.000 & Confirmed \\
+PO.2026.01.00001 & 2026-01-15 & PT Sumber Makmur & 1 & Rp 10.000.000 & Confirmed \\
+PO.2025.12.00001 & 2025-12-15 & PT Anugerah Material & 1 & Rp 7.000.000 & Confirmed \\
+PO.2025.11.00001 & 2025-11-15 & CV Mandiri Teknik & 1 & Rp 9.000.000 & Confirmed \\
+PO.2025.10.00001 & 2025-10-15 & PT Global Supplindo & 1 & Rp 8.000.000 & Confirmed \\
+PO.2025.09.00001 & 2025-09-15 & UD Sentosa & 1 & Rp 6.000.000 & Confirmed \\
+PO.2025.08.00001 & 2025-08-15 & CV Karya Abadi & 1 & Rp 7.000.000 & Confirmed \\
+PO.2025.07.00001 & 2025-07-15 & PT Sumber Makmur & 1 & Rp 5.000.000 & Confirmed \\
+ &  & \textbf{TOTAL} &  & \textbf{Rp 153.019.600} &  \\
+\end{longtable}}
+
+\section{Hutang Dagang (ke Supplier)}
+1 faktur pembelian belum lunas, total hutang \textbf{Rp 577.200}.
+
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l p{3.2cm} l l R{2.4cm} R{2.4cm} l}
+\toprule
+\textbf{No. Inv} & \textbf{Supplier} & \textbf{Tanggal} & \textbf{Jatuh Tempo} & \textbf{Nilai} & \textbf{Sisa} & \textbf{Status} \\
+\midrule\endfirsthead
+\toprule
+\textbf{No. Inv} & \textbf{Supplier} & \textbf{Tanggal} & \textbf{Jatuh Tempo} & \textbf{Nilai} & \textbf{Sisa} & \textbf{Status} \\
+\midrule\endhead
+\bottomrule\endfoot
+PI-1 & CV Karya Abadi & 2026-05-26 & 2026-06-26 & Rp 577.200 & Rp 577.200 & Unpaid \\
+ &  &  &  & \textbf{TOTAL} & \textbf{Rp 577.200} &  \\
+\end{longtable}}
+
+\section{Stock Valuation (Nilai Persediaan)}
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l p{4.2cm} R{1.6cm} l R{2.4cm} R{2.8cm}}
+\toprule
+\textbf{Kode} & \textbf{Nama Item} & \textbf{Stok} & \textbf{Satuan} & \textbf{H. Pokok} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Kode} & \textbf{Nama Item} & \textbf{Stok} & \textbf{Satuan} & \textbf{H. Pokok} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+BAT 004 & Batu Alam Split 20-30 mm & 610 & Ton & Rp 96.000 & Rp 58.560.000 \\
+BAT 003 & Batu Alam Split 10-20 mm & 520 & Ton & Rp 108.000 & Rp 56.160.000 \\
+100025 & Pasir Alam-Leles & 150 & Ton & Rp 121.000 & Rp 18.150.000 \\
+AS001 & AGREGAT SLAG 0-5 MM & 340 & Ton & Rp 43.000 & Rp 14.620.000 \\
+BAT 001 & Batu Alam abu batu 0-5 mm & 240 & Ton & Rp 49.000 & Rp 11.760.000 \\
+BAT 002 & Batu Alam Screening 5-10 mm & 130 & Ton & Rp 84.000 & Rp 10.920.000 \\
+BA 003 & Batu Alam Split 10-20 mm & 70 & M3 & Rp 152.000 & Rp 10.640.000 \\
+AS002 & AGREGAT SLAG 5-10 MM & 180 & Ton & Rp 50.000 & Rp 9.000.000 \\
+BA 004 & Batu Alam Split 20-30 mm & 55 & M3 & Rp 140.000 & Rp 7.700.000 \\
+AS003 & AGREGAT SLAG 10-20 MM & 95 & Ton & Rp 52.000 & Rp 4.940.000 \\
+T00001 & ongkir & 90 & Ton & Rp 47.000 & Rp 4.230.000 \\
+BA 002 & Batu Alam Screening 5-10 mm & 45 & M3 & Rp 78.000 & Rp 3.510.000 \\
+AS004 & AGREGAT SLAG 20-30 MM & 60 & Ton & Rp 53.000 & Rp 3.180.000 \\
+ &  &  &  & \textbf{TOTAL} & \textbf{Rp 213.370.000} \\
+\end{longtable}}
+
+\section{Stok Minimum Alert (Reorder Point)}
+Semua item berada di atas titik pemesanan ulang. Tidak ada peringatan stok saat ini.
+
+\section{Rekapitulasi PPN (SPT PPN)}
+Masa Pajak: \textbf{2026-06} \quad Tarif PPN 11\%
+
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l R{3.2cm} R{3.2cm}}
+\toprule
+\textbf{Ringkasan} & \textbf{DPP} & \textbf{PPN} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Ringkasan} & \textbf{DPP} & \textbf{PPN} \\
+\midrule\endhead
+\bottomrule\endfoot
+PPN Keluaran (Penjualan) & Rp 45.373.050 & Rp 4.991.036 \\
+PPN Masukan (Pembelian) & Rp 60.442.400 & Rp 6.648.664 \\
+\textbf{Lebih Bayar} &  & \textbf{Rp 1.657.628} \\
+\end{longtable}}
+
+\subsection{PPN Keluaran - Penjualan (7 transaksi)}
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l l p{4cm} R{2.6cm} R{2.4cm}}
+\toprule
+\textbf{Tanggal} & \textbf{No. SO} & \textbf{Pelanggan} & \textbf{DPP} & \textbf{PPN (11\%)} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Tanggal} & \textbf{No. SO} & \textbf{Pelanggan} & \textbf{DPP} & \textbf{PPN (11\%)} \\
+\midrule\endhead
+\bottomrule\endfoot
+2026-06-01 & SO.2026.06.00001 & CV Mitra Sejahtera & Rp 4.351.200 & Rp 478.632 \\
+2026-06-15 & SO.2026.06.00002 & PT Cahaya Abadi & Rp 24.000.000 & Rp 2.640.000 \\
+2026-06-05 & SO.2026.06.00003 & PT Andalan Niaga & Rp 371.850 & Rp 40.904 \\
+2026-06-08 & SO.2026.06.00004 & CV Sumber Rejeki & Rp 743.700 & Rp 81.807 \\
+2026-06-10 & SO.2026.06.00005 & Toko Maju Mundur & Rp 5.117.100 & Rp 562.881 \\
+2026-06-12 & SO.2026.06.00006 & PT Bintang Timur & Rp 6.327.000 & Rp 695.970 \\
+2026-06-13 & SO.2026.06.00007 & UD Sinar Terang & Rp 4.462.200 & Rp 490.842 \\
+ &  & \textbf{TOTAL} & \textbf{Rp 45.373.050} & \textbf{Rp 4.991.036} \\
+\end{longtable}}
+
+\subsection{PPN Masukan - Pembelian (4 transaksi)}
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l l p{4cm} R{2.6cm} R{2.4cm}}
+\toprule
+\textbf{Tanggal} & \textbf{No. PO} & \textbf{Supplier} & \textbf{DPP} & \textbf{PPN (11\%)} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Tanggal} & \textbf{No. PO} & \textbf{Supplier} & \textbf{DPP} & \textbf{PPN (11\%)} \\
+\midrule\endhead
+\bottomrule\endfoot
+2026-06-02 & PO.2026.06.00001 & PT Sumber Makmur & Rp 30.747.000 & Rp 3.382.170 \\
+2026-06-15 & PO.2026.06.00002 & PT Anugerah Material & Rp 14.000.000 & Rp 1.540.000 \\
+2026-06-04 & PO.2026.06.00003 & PT Global Supplindo & Rp 5.594.400 & Rp 615.384 \\
+2026-06-09 & PO.2026.06.00004 & PT Anugerah Material & Rp 10.101.000 & Rp 1.111.110 \\
+ &  & \textbf{TOTAL} & \textbf{Rp 60.442.400} & \textbf{Rp 6.648.664} \\
+\end{longtable}}
+
+\section{Audit Journal (Jurnal Umum, Double Entry)}
+5 entri jurnal tercatat.
+
+{\setlength{\tabcolsep}{5pt}\footnotesize
+\begin{longtable}{p{3.9cm} l p{4.6cm} R{2.6cm} R{2.6cm}}
+\toprule
+\textbf{ID Jurnal} & \textbf{Tanggal} & \textbf{Akun} & \textbf{Debit} & \textbf{Kredit} \\
+\midrule\endfirsthead
+\toprule
+\textbf{ID Jurnal} & \textbf{Tanggal} & \textbf{Akun} & \textbf{Debit} & \textbf{Kredit} \\
+\midrule\endhead
+\bottomrule\endfoot
+J:SI:2:rev & 2026-05-23 & 110201 Piutang Usaha & Rp 44.622.000 &  \\
+ &  & 400001 Penjualan &  & Rp 40.200.000 \\
+ &  & 210201 Hutang PPN (PPN Keluaran) &  & Rp 4.422.000 \\
+ &  & 510101 Beban Pokok Penjualan & Rp 30.800.000 &  \\
+ &  & 110401 Persediaan Barang &  & Rp 30.800.000 \\
+J:SR:1 & 2026-05-24 & 110101 Kas & Rp 44.622.000 &  \\
+ &  & 110201 Piutang Usaha &  & Rp 44.622.000 \\
+J:PO:PO.2026.05.00002:recv & 2026-05-25 & 110401 Persediaan Barang & Rp 520.000 &  \\
+ &  & 130101 PPN Masukan & Rp 57.200 &  \\
+ &  & 210101 Hutang Usaha &  & Rp 577.200 \\
+J:PI:2:recv & 2026-06-05 & 110401 Persediaan Barang & Rp 5.040.000 &  \\
+ &  & 130101 PPN Masukan & Rp 554.400 &  \\
+ &  & 210101 Hutang Usaha &  & Rp 5.594.400 \\
+J:PP:1 & 2026-06-06 & 210101 Hutang Usaha & Rp 5.594.400 &  \\
+ &  & 110101 Kas &  & Rp 5.594.400 \\
+ &  & \textbf{TOTAL} & \textbf{Rp 131.810.000} & \textbf{Rp 131.810.000} \\
+\end{longtable}}
+
+\vspace{2pt}\noindent\colorbox{soft}{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{Total debit = total kredit = Rp 131.810.000. Jurnal seimbang.}}}\vspace{4pt}
+
+\section{Account History - Akun 110101 Kas}
+{\setlength{\tabcolsep}{5pt}\small
+\begin{longtable}{l p{3cm} p{3.4cm} R{2.4cm} R{2.4cm} R{2.6cm}}
+\toprule
+\textbf{Tanggal} & \textbf{Ref} & \textbf{Keterangan} & \textbf{Debit} & \textbf{Kredit} & \textbf{Saldo} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Tanggal} & \textbf{Ref} & \textbf{Keterangan} & \textbf{Debit} & \textbf{Kredit} & \textbf{Saldo} \\
+\midrule\endhead
+\bottomrule\endfoot
+ &  & Saldo Awal &  &  & Rp 0 \\
+2026-05-24 & J:SR:1 & Penerimaan 1 & Rp 44.622.000 &  & Rp 44.622.000 \\
+2026-06-06 & J:PP:1 & Pembayaran 1 &  & Rp 5.594.400 & Rp 39.027.600 \\
+ &  & \textbf{Saldo Akhir} &  &  & \textbf{Rp 39.027.600} \\
+\end{longtable}}
+
+\textit{\small Laporan serupa dapat dibuat untuk setiap akun pada daftar akun (COA). Contoh di atas untuk akun Kas.}
+
+\section{AI Business Analysis}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l l l l}
+\toprule
+\textbf{Total Omzet} & \textbf{Gross Profit} & \textbf{Margin} & \textbf{Piutang Outstanding} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Total Omzet} & \textbf{Gross Profit} & \textbf{Margin} & \textbf{Piutang Outstanding} \\
+\midrule\endhead
+\bottomrule\endfoot
+Rp 249.823.550 & Rp 96.803.950 & 38.7\% & Rp 249.823.550 \\
+\end{longtable}}
+
+\subsection{Insight Otomatis}
+\begin{itemize}\setlength{\itemsep}{2pt}
+\item Gross margin 38.7\% tergolong sangat sehat, efisiensi biaya terjaga.
+\item Piutang belum tertagih Rp 249.823.550 (100\% dari omzet). Perlu follow up penagihan.
+\item Pelanggan terbesar: Toko Berkah Jaya (Rp 74.622.000).
+\item Item terlaris berdasarkan nilai: Batu Alam Split 10-20 mm.
+\end{itemize}
+\subsection{Top 5 Pelanggan}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{c p{7cm} R{3cm}}
+\toprule
+\textbf{\#} & \textbf{Pelanggan} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{\#} & \textbf{Pelanggan} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+1 & Toko Berkah Jaya & Rp 74.622.000 \\
+2 & PT Cahaya Abadi & Rp 41.828.500 \\
+3 & CV Mitra Sejahtera & Rp 31.351.200 \\
+4 & PT Andalan Niaga & Rp 27.371.850 \\
+5 & PT Bintang Timur & Rp 23.327.000 \\
+\end{longtable}}
+
+\subsection{Top 5 Item Terjual (per nilai)}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{c p{6cm} R{2.4cm} R{3cm}}
+\toprule
+\textbf{\#} & \textbf{Item} & \textbf{Qty} & \textbf{Nilai} \\
+\midrule\endfirsthead
+\toprule
+\textbf{\#} & \textbf{Item} & \textbf{Qty} & \textbf{Nilai} \\
+\midrule\endhead
+\bottomrule\endfoot
+1 & Batu Alam Split 10-20 mm & 122 & Rp 55.900.000 \\
+2 & Batu Alam Screening 5-10 mm & 202 & Rp 49.200.000 \\
+3 & Batu Alam Split 20-30 mm & 2 & Rp 37.000.000 \\
+4 & Batu Alam abu batu 0-5 mm & 1 & Rp 24.000.000 \\
+5 & AGREGAT SLAG 0-5 MM & 141 & Rp 15.980.000 \\
+\end{longtable}}
+
+\subsection{Tren Penjualan vs Pembelian per Bulan}
+{\setlength{\tabcolsep}{5pt}
+\begin{longtable}{l R{4cm} R{4cm}}
+\toprule
+\textbf{Bulan} & \textbf{Penjualan} & \textbf{Pembelian} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Bulan} & \textbf{Penjualan} & \textbf{Pembelian} \\
+\midrule\endhead
+\bottomrule\endfoot
+2025-07 & Rp 8.000.000 & Rp 5.000.000 \\
+2025-08 & Rp 11.000.000 & Rp 7.000.000 \\
+2025-09 & Rp 9.000.000 & Rp 6.000.000 \\
+2025-10 & Rp 13.000.000 & Rp 8.000.000 \\
+2025-11 & Rp 15.000.000 & Rp 9.000.000 \\
+2025-12 & Rp 12.000.000 & Rp 7.000.000 \\
+2026-01 & Rp 17.000.000 & Rp 10.000.000 \\
+2026-02 & Rp 14.000.000 & Rp 8.000.000 \\
+2026-03 & Rp 19.000.000 & Rp 11.000.000 \\
+2026-04 & Rp 16.000.000 & Rp 9.000.000 \\
+2026-05 & Rp 70.450.500 & Rp 12.577.200 \\
+2026-06 & Rp 45.373.050 & Rp 60.442.400 \\
+\end{longtable}}
+
+\vfill
+\begin{center}\color{grey}\small Seluruh laporan dapat difilter per periode, dicetak, dan di-export ke Excel. Angka pada dokumen ini dihitung langsung dari data aktual pada sistem.\end{center}
+\end{document}

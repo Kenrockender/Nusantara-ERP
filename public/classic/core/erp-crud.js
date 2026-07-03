@@ -1166,7 +1166,7 @@ function showAddPO() {
         tax: poTax,
         status,
         lines,
-        warehouseId: whSelPO ? whSelPO.value : undefined,
+        warehouseId: whSelPO ? whSelPO.value : null,
         stockMutated: false,
       };
       if (status === 'Received') {
@@ -2357,19 +2357,33 @@ function showUserManagement() {
   const ROLE_LABELS = window.erpUsers.roleLabels || {};
   const ROLES = window.erpUsers.roles || ['admin', 'manajer', 'akunting', 'penjualan', 'viewer'];
   const myUid = (window.__ERP_USER && window.__ERP_USER.uid) || null;
+  const isLocal = (window.__ERP_USER && window.__ERP_USER.mode) === 'local';
+
+  const intro = isLocal
+    ? `<p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+         Akun login lokal (username + password). Tambah pengguna, atur peran,
+         reset password, atau nonaktifkan akun di sini. Password disimpan
+         ter-hash di perangkat ini.
+       </p>
+       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+         <button class="btn" id="um-add" style="font-size:11px;padding:4px 10px">＋ Tambah User</button>
+         <button class="btn-ghost" id="um-log" style="font-size:11px;padding:4px 10px">📋 Log Aktivitas User</button>
+       </div>`
+    : `<p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+         Akun dibuat di Firebase Console. Pengguna yang sudah login muncul di sini
+         dengan role <strong>pending</strong> hingga Anda menetapkan peran. Peran
+         bisa diatur otomatis dari <strong>Departemen</strong> karyawan (cocok via
+         email) atau manual di sini. Perubahan tersimpan langsung ke cloud.
+       </p>
+       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+         <button class="btn-ghost" id="um-depts" style="font-size:11px;padding:4px 10px">Kelola Departemen</button>
+         <button class="btn" id="um-sync" style="font-size:11px;padding:4px 10px">Sinkronkan dari Departemen</button>
+         <button class="btn-ghost" id="um-log" style="font-size:11px;padding:4px 10px">📋 Log Aktivitas User</button>
+       </div>`;
 
   openModal(
     'Manajemen Pengguna',
-    `<p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
-       Akun dibuat di Firebase Console. Pengguna yang sudah login muncul di sini
-       dengan role <strong>pending</strong> hingga Anda menetapkan peran. Peran
-       bisa diatur otomatis dari <strong>Departemen</strong> karyawan (cocok via
-       email) atau manual di sini. Perubahan tersimpan langsung ke cloud.
-     </p>
-     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-       <button class="btn-ghost" id="um-depts" style="font-size:11px;padding:4px 10px">Kelola Departemen</button>
-       <button class="btn" id="um-sync" style="font-size:11px;padding:4px 10px">Sinkronkan dari Departemen</button>
-     </div>
+    `${intro}
      <div id="um-list" style="min-height:60px">
        <div style="font-size:12px;color:var(--muted);text-align:center;padding:14px">Memuat daftar pengguna…</div>
      </div>`,
@@ -2400,16 +2414,23 @@ function showUserManagement() {
       .map(u => {
         const self = u.uid === myUid;
         const active = u.active !== false;
-        const der = roleForEmail(u.email);
+        const der = u.local ? null : roleForEmail(u.email);
         const deptLine = der
           ? `<div style="font-size:10px;color:${der.role === u.role ? 'var(--muted)' : 'var(--primary,#2563eb)'};margin-top:1px">
                Dept: ${escapeHtml(der.department.name)} → ${escapeHtml((ROLE_LABELS[der.role] || der.role))}${der.role !== u.role ? ' · belum sinkron' : ''}
              </div>`
           : '';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+        const subLine = u.local
+          ? `@${escapeHtml(u.username || u.uid)}${u.mustChangePassword ? ' · <span style="color:var(--warning,#b45309)">password default</span>' : ''}`
+          : escapeHtml(u.email || '—');
+        const localActions = u.local
+          ? `<button class="btn-ghost um-reset" data-uid="${escapeHtml(u.uid)}" style="font-size:10px;padding:3px 7px">Reset PW</button>
+             ${u.uid === 'admin' ? '' : `<button class="btn-ghost um-del" data-uid="${escapeHtml(u.uid)}" style="font-size:10px;padding:3px 7px;color:var(--danger)">Hapus</button>`}`
+          : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
           <div style="min-width:0;flex:1">
             <div style="font-size:12px;font-weight:700">${escapeHtml(u.displayName || u.email || u.uid)}${self ? ' <span style="color:var(--muted);font-weight:400">(Anda)</span>' : ''}</div>
-            <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(u.email || '—')}</div>
+            <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${subLine}</div>
             ${deptLine}
           </div>
           <select class="form-input um-role" data-uid="${escapeHtml(u.uid)}" ${self ? 'disabled title="Anda tidak dapat mengubah peran sendiri"' : ''} style="font-size:11px;width:auto;padding:4px 8px">
@@ -2418,9 +2439,38 @@ function showUserManagement() {
           <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:${self ? 'not-allowed' : 'pointer'}">
             <input type="checkbox" class="um-active" data-uid="${escapeHtml(u.uid)}" ${active ? 'checked' : ''} ${self ? 'disabled' : ''}> Aktif
           </label>
+          ${localActions}
         </div>`;
       })
       .join('');
+
+    el.querySelectorAll('.um-reset').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid;
+        const pw = prompt(`Password baru untuk "${uid}" (minimal 6 karakter):`);
+        if (pw == null) return;
+        try {
+          await window.erpUsers.resetPassword(uid, pw);
+          showToast('Password direset', 'success');
+          load();
+        } catch (e) {
+          showToast(e?.message || 'Gagal reset password', 'danger');
+        }
+      })
+    );
+    el.querySelectorAll('.um-del').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid;
+        if (!confirm(`Hapus user "${uid}"? Tindakan ini tidak dapat dibatalkan.`)) return;
+        try {
+          await window.erpUsers.remove(uid);
+          showToast('User dihapus', 'success');
+          load();
+        } catch (e) {
+          showToast(e?.message || 'Gagal menghapus user', 'danger');
+        }
+      })
+    );
 
     el.querySelectorAll('.um-role, .um-active').forEach(ctrl => {
       ctrl.addEventListener('change', async () => {
@@ -2458,8 +2508,124 @@ function showUserManagement() {
       await applyDepartmentRoles({});
       load();
     });
+    document.getElementById('um-add')?.addEventListener('click', () => showAddLocalUser(load));
+    document.getElementById('um-log')?.addEventListener('click', showLoginLog);
     load();
   }, 60);
+}
+
+// Add a new local user. onDone re-renders the user list when provided.
+function showAddLocalUser(onDone) {
+  if (!window.erpUsers || typeof window.erpUsers.create !== 'function') {
+    showToast('Tambah user tidak tersedia', 'warning');
+    return;
+  }
+  const ROLE_LABELS = window.erpUsers.roleLabels || {};
+  const ROLES = window.erpUsers.roles || ['admin', 'manajer', 'akunting', 'penjualan', 'viewer'];
+  const roleOpts = ROLES.map(
+    r => `<option value="${escapeHtml(r)}"${r === 'admin' ? ' selected' : ''}>${escapeHtml(ROLE_LABELS[r] || r)}</option>`
+  ).join('');
+  openModal(
+    'Tambah User',
+    `<div class="form-group">
+       <label class="form-label">Username</label>
+       <input class="form-input" id="au-username" type="text" autocapitalize="none" placeholder="cth: budi" spellcheck="false">
+     </div>
+     <div class="form-group">
+       <label class="form-label">Nama Tampilan</label>
+       <input class="form-input" id="au-name" type="text" placeholder="cth: Budi Santoso">
+     </div>
+     <div class="form-group">
+       <label class="form-label">Password (min. 6 karakter)</label>
+       <input class="form-input" id="au-pw" type="text" placeholder="Password awal">
+     </div>
+     <div class="form-group">
+       <label class="form-label">Peran</label>
+       <select class="form-select" id="au-role">${roleOpts}</select>
+     </div>`,
+    `<button class="btn-ghost" data-action="closeModal">Batal</button>
+     <button class="btn" id="au-save">Simpan</button>`
+  );
+  setTimeout(() => {
+    document.getElementById('au-save')?.addEventListener('click', async () => {
+      const username = (document.getElementById('au-username')?.value || '').trim();
+      const name = (document.getElementById('au-name')?.value || '').trim();
+      const pw = document.getElementById('au-pw')?.value || '';
+      const role = document.getElementById('au-role')?.value || 'admin';
+      try {
+        await window.erpUsers.create(username, name || username, pw, role);
+        showToast(`User "${username}" dibuat`, 'success');
+        closeModal();
+        if (typeof onDone === 'function') {
+          // Re-open the user management list so the new user is visible.
+          showUserManagement();
+        }
+      } catch (e) {
+        showToast(e?.message || 'Gagal membuat user', 'danger');
+      }
+    });
+  }, 40);
+}
+
+// Login activity log — who signed in/out, when.
+function showLoginLog() {
+  const log =
+    window.erpUsers && typeof window.erpUsers.loginLog === 'function'
+      ? window.erpUsers.loginLog()
+      : [];
+  const fmt = ts => {
+    try {
+      return new Date(ts).toLocaleString('id-ID');
+    } catch (_) {
+      return String(ts);
+    }
+  };
+  const rows = log.length
+    ? log
+        .map(
+          e => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 8px;font-size:12px;font-weight:600">${escapeHtml(e.displayName || e.username)}</td>
+        <td style="padding:6px 8px;font-size:11px;color:var(--muted)">@${escapeHtml(e.username)}</td>
+        <td style="padding:6px 8px;font-size:11px">${
+          e.event === 'logout'
+            ? '<span style="color:var(--muted)">Logout</span>'
+            : '<span style="color:var(--success,#16a34a);font-weight:700">Login</span>'
+        }</td>
+        <td style="padding:6px 8px;font-size:11px;color:var(--muted);white-space:nowrap">${escapeHtml(fmt(e.ts))}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">Belum ada aktivitas login.</td></tr>';
+  openModal(
+    'Log Aktivitas User',
+    `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Menampilkan ${log.length} aktivitas terakhir (login/logout).</div>
+     <div class="table-wrap" style="overflow:auto;max-height:60vh">
+       <table style="width:100%;border-collapse:collapse">
+         <thead><tr style="border-bottom:1.5px solid var(--border)">
+           <th style="text-align:left;padding:6px 8px;font-size:11px">Nama</th>
+           <th style="text-align:left;padding:6px 8px;font-size:11px">Username</th>
+           <th style="text-align:left;padding:6px 8px;font-size:11px">Aktivitas</th>
+           <th style="text-align:left;padding:6px 8px;font-size:11px">Waktu</th>
+         </tr></thead>
+         <tbody>${rows}</tbody>
+       </table>
+     </div>`,
+    `<button class="btn-ghost" id="ll-clear" style="color:var(--danger)">Bersihkan Log</button>
+     <button class="btn-ghost" id="ll-back">Kembali</button>
+     <button class="btn" data-action="closeModal">Tutup</button>`,
+    true
+  );
+  setTimeout(() => {
+    document.getElementById('ll-back')?.addEventListener('click', showUserManagement);
+    document.getElementById('ll-clear')?.addEventListener('click', () => {
+      if (!confirm('Bersihkan seluruh log aktivitas login?')) return;
+      if (window.erpUsers && typeof window.erpUsers.clearLoginLog === 'function') {
+        window.erpUsers.clearLoginLog();
+      }
+      showToast('Log dibersihkan', 'success');
+      showLoginLog();
+    });
+  }, 40);
 }
 
 function showAddUser() {
@@ -3772,6 +3938,23 @@ function viewSO(id) {
        </div>`
       : '';
 
+  // Back-reference: invoices created from this SO (SI.sourceId === SO.id).
+  const linkedSIs = (DB.salesInvoices || []).filter(s => s.sourceId === id);
+  const siLinksHtml =
+    linkedSIs.length > 0
+      ? `<div style="margin:10px 0;padding:8px 12px;background:var(--bg);border-radius:8px;
+                  font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:700;color:var(--muted)">Faktur Terkait:</span>
+        ${linkedSIs
+          .map(
+            s =>
+              `<button class="action-ghost" data-action="viewSI" data-id="${escapeHtml(s.id)}"
+            style="font-size:11px">${escapeHtml(docNum(s.number, s.id))} · ${badge(s.status)}</button>`
+          )
+          .join('')}
+       </div>`
+      : '';
+
   openModal(
     `Detail SO — ${escapeHtml(docNum(o.number, o.id))}`,
     `
@@ -3785,6 +3968,7 @@ function viewSO(id) {
       ${o.warehouseId && window.Warehouse ? detailRow('Gudang', escapeHtml(window.Warehouse.warehouseName(o.warehouseId))) : ''}
     </div>
     ${doLinksHtml}
+    ${siLinksHtml}
     ${linesDetailHTML(o.lines, 'Total Penjualan', o)}
     ${dpSummaryHTML('SO', id, o.amount || 0)}
     ${paymentLogHTML('SO', id, o)}
@@ -3800,6 +3984,16 @@ function viewSO(id) {
        <circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
      </svg>
      Buat DO
+   </button>
+   <button class="btn-ghost" data-action="createSIFromSO" data-id="${escapeHtml(id)}"
+     style="display:flex;align-items:center;gap:5px">
+     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+       <polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/>
+       <line x1="9" y1="14" x2="15" y2="14"/>
+     </svg>
+     Buat Faktur
    </button>
    <button class="btn-ghost" data-action="duplicateSO" data-id="${escapeHtml(id)}"
      style="display:flex;align-items:center;gap:5px">
@@ -3852,6 +4046,23 @@ function viewPO(id) {
        </div>`
       : '';
 
+  // Back-reference: invoices created from this PO (PI.sourceId === PO.id).
+  const linkedPIs = (DB.purchaseInvoices || []).filter(p => p.sourceId === id);
+  const piLinksHtml =
+    linkedPIs.length > 0
+      ? `<div style="margin:10px 0;padding:8px 12px;background:var(--bg);border-radius:8px;
+                  font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:700;color:var(--muted)">Faktur Terkait:</span>
+        ${linkedPIs
+          .map(
+            p =>
+              `<button class="action-ghost" data-action="viewPI" data-id="${escapeHtml(p.id)}"
+            style="font-size:11px">${escapeHtml(docNum(p.number, p.id))} · ${badge(p.status)}</button>`
+          )
+          .join('')}
+       </div>`
+      : '';
+
   openModal(
     `Detail PO — ${escapeHtml(docNum(o.number, o.id))}`,
     `
@@ -3865,6 +4076,7 @@ function viewPO(id) {
       ${o.warehouseId && window.Warehouse ? detailRow('Gudang', escapeHtml(window.Warehouse.warehouseName(o.warehouseId))) : ''}
     </div>
     ${doLinksHtml}
+    ${piLinksHtml}
     ${linesDetailHTML(o.lines, 'Total Pembelian', o)}
     ${dpSummaryHTML('PO', id, o.amount || 0)}
     ${paymentLogHTML('PO', id, o)}
@@ -3880,6 +4092,16 @@ function viewPO(id) {
        <circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
      </svg>
      Buat DO
+   </button>
+   <button class="btn-ghost" data-action="createPIFromPO" data-id="${escapeHtml(id)}"
+     style="display:flex;align-items:center;gap:5px">
+     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+       <polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/>
+       <line x1="9" y1="14" x2="15" y2="14"/>
+     </svg>
+     Buat Faktur
    </button>
    <button class="btn-ghost" data-action="duplicatePO" data-id="${escapeHtml(id)}"
      style="display:flex;align-items:center;gap:5px">
@@ -3912,6 +4134,29 @@ function viewPO(id) {
 function _getCustomerAddress(name) {
   const c = (DB.customers || []).find(c => c.name === name);
   return c ? c.address || '' : '';
+}
+
+/**
+ * Detect whether a DO is being delivered somewhere other than the party's
+ * address on file. Returns { changed, from, note }. When the entered destination
+ * differs from the registered customer/supplier address, the DO is flagged and a
+ * note "Tujuan diubah dari X ke Y" is produced so logistics can see the override.
+ */
+function _detectDestChange(refType, party, destination) {
+  const expected = refType === 'PO' ? _getSupplierAddress(party) : _getCustomerAddress(party);
+  const norm = s =>
+    String(s || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  if (!expected || !destination || norm(expected) === norm(destination)) {
+    return { changed: false, from: '', note: '' };
+  }
+  return {
+    changed: true,
+    from: expected,
+    note: `⚠ Tujuan diubah dari "${expected}" ke "${destination}"`,
+  };
 }
 
 // Statuses that make an SO/PO selectable as a DO reference. Accurate-derived
@@ -4341,24 +4586,30 @@ function showAddDO(preselect) {
         : poId
           ? (DB.purchaseOrders.find(p => p.id === poId)?.supplierId ?? null)
           : null;
-      const doNumber = window.DocEngine
-        ? window.DocEngine.nextNumber('DO', date, { commit: true })
-        : null;
+      // Single canonical DO number: the id IS the formatted number
+      // (DO.YYYY.MM.NNNNN), so number mirrors it — no separate counter that can
+      // drift from the id sequence.
+      const newDoId = nextId('DO', DB.deliveryOrders);
+      // Flag deliveries routed to a different address than the party's on file.
+      const dc = _detectDestChange(refType, customer, destination);
+      const finalNotes = dc.changed ? (notes ? `${dc.note}\n${notes}` : dc.note) : notes;
       const newDO = {
-        id: nextId('DO', DB.deliveryOrders),
-        number: doNumber || undefined,
+        id: newDoId,
+        number: newDoId,
         soId: soId || null,
         poId: poId || null,
         customer,
         customerId: soId ? partyId : null,
         supplierId: poId ? partyId : null,
         destination,
+        destChanged: dc.changed,
+        destOriginal: dc.changed ? dc.from : '',
         date,
         status,
         driver,
         vehicle,
         customerPO,
-        notes,
+        notes: finalNotes,
         lines,
       };
       DB.deliveryOrders.unshift(newDO);
@@ -4433,6 +4684,17 @@ function editDO(id) {
       o.supplierId = poId ? (DB.purchaseOrders.find(p => p.id === poId)?.supplierId ?? null) : null;
       o.destination = destination;
       o.date = date;
+      // Re-evaluate the destination-change flag. Strip any previous auto-note so
+      // it isn't stacked on repeated edits, then re-add if still applicable.
+      const dcNotes = notes
+        .split('\n')
+        .filter(l => !l.trim().startsWith('⚠ Tujuan diubah'))
+        .join('\n')
+        .trim();
+      const dc = _detectDestChange(refType, customer, destination);
+      o.destChanged = dc.changed;
+      o.destOriginal = dc.changed ? dc.from : '';
+      o.notes = dc.changed ? (dcNotes ? `${dc.note}\n${dcNotes}` : dc.note) : dcNotes;
       if (
         status !== o.status &&
         window.DocEngine &&
@@ -4445,7 +4707,6 @@ function editDO(id) {
       o.driver = driver;
       o.vehicle = vehicle;
       o.customerPO = customerPO;
-      o.notes = notes;
       o.lines = lines;
       // The form was seeded from `items` for Accurate-imported DOs — once the
       // user saves, `lines` is the single source of truth for the line data.
@@ -4474,7 +4735,16 @@ function viewDO(id) {
     ? `<a style="color:var(--primary);cursor:pointer;text-decoration:underline;font-weight:700"
           data-action="viewPO" data-id="${escapeHtml(o.poId)}">${escapeHtml(o.poId)}</a>`
     : '';
-  const refRow = o.poId ? detailRow('Ref. PO', poRefHtml) : detailRow('Ref. SO', soRefHtml);
+  // Make the DO's origin explicit: it is created either from a PO (purchase
+  // delivery) or an SO (sales delivery), or stands alone with no reference.
+  function _srcTag(text, color, bg, border) {
+    return `<span style="display:inline-block;font-size:9px;font-weight:800;color:${color};background:${bg};border:1px solid ${border};border-radius:99px;padding:1px 7px;margin-right:6px;vertical-align:middle">${text}</span>`;
+  }
+  const refRow = o.poId
+    ? detailRow('Dibuat dari', _srcTag('DARI PO', '#B45309', '#FEF3C7', '#FCD34D') + poRefHtml)
+    : o.soId
+      ? detailRow('Dibuat dari', _srcTag('DARI SO', '#1D4ED8', '#DBEAFE', '#93C5FD') + soRefHtml)
+      : detailRow('Dibuat dari', '<span style="color:var(--muted)">Tanpa referensi (DO manual)</span>');
   const partyLabel = o.poId ? 'Supplier' : 'Pelanggan';
 
   // Accurate-imported DOs store their lines in `items`; native DOs use `lines`.
@@ -4517,7 +4787,14 @@ function viewDO(id) {
       <div class="detail-divider"></div>
       ${refRow}
       ${detailRow(partyLabel, escapeHtml(o.customer))}
-      ${detailRow('Tujuan', escapeHtml(o.destination))}
+      ${detailRow(
+        'Tujuan',
+        escapeHtml(o.destination) +
+          (o.destChanged
+            ? ` <span style="display:inline-block;font-size:9px;font-weight:800;color:#B45309;background:#FEF3C7;border:1px solid #FCD34D;border-radius:99px;padding:1px 6px">⚠ DIUBAH</span>`
+            : '')
+      )}
+      ${o.destChanged && o.destOriginal ? detailRow('Tujuan Asal', escapeHtml(o.destOriginal)) : ''}
       ${detailRow('Tgl. Kirim', escapeHtml(o.date))}
       <div class="detail-divider"></div>
       ${detailRow('Driver', escapeHtml(o.driver))}
@@ -4588,8 +4865,8 @@ function showBulkSuratJalan(doId) {
       <div class="form-group">
         <label class="form-label">Prefix No. Surat Jalan</label>
         <input class="form-input" id="bulk-sj-prefix" type="text"
-          value="NSA-${new Date().getFullYear().toString().slice(-2)}-${doSeq}"
-          placeholder="NSA-26-039">
+          value="SJ-${new Date().getFullYear().toString().slice(-2)}-${doSeq}"
+          placeholder="SJ-26-039">
       </div>
       <div class="form-group">
         <label class="form-label">No. PO Customer <span style="font-size:10px;color:var(--muted)">(opsional)</span></label>
@@ -5538,6 +5815,38 @@ document.addEventListener('click', e => {
     case 'createDOFromPO':
       closeModal();
       setTimeout(() => showAddDO({ poId: id }), 300);
+      break;
+
+    case 'createSIFromSO':
+      closeModal();
+      setTimeout(() => {
+        if (window._invoiceExtras && window._invoiceExtras.createFromSource) {
+          window._invoiceExtras.createFromSource('SI', id);
+        } else {
+          showToast('Modul faktur belum siap', 'warning');
+        }
+      }, 300);
+      break;
+
+    case 'createPIFromPO':
+      closeModal();
+      setTimeout(() => {
+        if (window._invoiceExtras && window._invoiceExtras.createFromSource) {
+          window._invoiceExtras.createFromSource('PI', id);
+        } else {
+          showToast('Modul faktur belum siap', 'warning');
+        }
+      }, 300);
+      break;
+
+    case 'viewSI':
+      closeModal();
+      setTimeout(() => window.viewInvoiceDoc && window.viewInvoiceDoc('SI', id), 220);
+      break;
+
+    case 'viewPI':
+      closeModal();
+      setTimeout(() => window.viewInvoiceDoc && window.viewInvoiceDoc('PI', id), 220);
       break;
 
     case 'bulkSuratJalan':

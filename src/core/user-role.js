@@ -33,6 +33,14 @@ import {
 } from 'firebase/firestore';
 import { db as fbDb, isFirebaseConfigured } from '../config/firebase.js';
 import { getCurrentUser, getAuthMode } from './auth.js';
+import {
+  listLocalUsers,
+  setUserRoleLocal,
+  setUserActive,
+  addUser as addLocalUser,
+  setUserPassword as setLocalUserPassword,
+  deleteUser as deleteLocalUser,
+} from './local-users.js';
 
 // Always-admin accounts (matched case-insensitively against the auth email).
 // MUST mirror the bootstrapAdmin() allow-list in firestore.rules.
@@ -79,14 +87,13 @@ export async function resolveUserRole() {
   const email = user.email || '';
   const displayName = user.displayName || (email ? email.split('@')[0] : 'user');
 
-  // Local-fallback mode: single operator on this device → full admin. No shared
-  // database means server enforcement is irrelevant here.
+  // Local auth mode: the role comes from the signed-in local user account.
   if (mode !== 'firebase' || !isFirebaseConfigured || !fbDb) {
     return {
       uid: user.uid,
       email,
       displayName,
-      role: 'admin',
+      role: user.role || 'admin',
       active: true,
       mode: 'local',
       source: 'local',
@@ -148,20 +155,30 @@ export async function resolveUserRole() {
 
 // ── Admin helpers (User Management UI) ─────────────────────────────────────────
 
-/** List every known user document. Admin-only (enforced by rules). */
+/** Whether the app is running on local (non-Firebase) auth. */
+function isLocalMode() {
+  return getAuthMode() !== 'firebase' || !isFirebaseConfigured || !fbDb;
+}
+
+/** List every known user. In local mode reads the local user store. */
 export async function listUsers() {
-  if (!isFirebaseConfigured || !fbDb) {
-    // Local mode: surface the single local operator so the UI isn't empty.
-    const u = getCurrentUser();
-    return u
-      ? [{ uid: u.uid, email: u.email, displayName: u.displayName, role: 'admin', active: true, local: true }]
-      : [];
+  if (isLocalMode()) {
+    return listLocalUsers().map(u => ({
+      uid: u.username,
+      username: u.username,
+      email: u.username,
+      displayName: u.displayName,
+      role: u.role,
+      active: u.active,
+      mustChangePassword: u.mustChangePassword,
+      local: true,
+    }));
   }
   const snap = await getDocs(usersCol());
   return snap.docs.map(d => ({ uid: d.id, ...d.data() }));
 }
 
-/** Set a user's role and active flag. Admin-only (enforced by rules). */
+/** Set a user's role and active flag. Admin-only. */
 export async function setUserRole(uid, role, active = true) {
   if (!uid) {
     throw new Error('uid wajib diisi');
@@ -169,9 +186,35 @@ export async function setUserRole(uid, role, active = true) {
   if (!ROLES.includes(role) && role !== 'pending') {
     throw new Error(`Role tidak dikenal: ${role}`);
   }
-  if (!isFirebaseConfigured || !fbDb) {
-    throw new Error('Manajemen user hanya tersedia di mode cloud (Firebase).');
+  if (isLocalMode()) {
+    setUserRoleLocal(uid, role);
+    setUserActive(uid, !!active);
+    return true;
   }
   await setDoc(userRef(uid), { role, active: !!active }, { merge: true });
   return true;
+}
+
+/** Create a new user (local mode only). */
+export async function createUser(username, displayName, password, role = 'admin') {
+  if (!isLocalMode()) {
+    throw new Error('Buat user via Firebase Console untuk mode cloud.');
+  }
+  return addLocalUser(username, displayName, password, role);
+}
+
+/** Reset a user's password (local mode only). */
+export async function resetUserPassword(username, newPassword) {
+  if (!isLocalMode()) {
+    throw new Error('Reset password via Firebase Console untuk mode cloud.');
+  }
+  return setLocalUserPassword(username, newPassword);
+}
+
+/** Remove a user (local mode only). */
+export async function removeUser(username) {
+  if (!isLocalMode()) {
+    throw new Error('Hapus user via Firebase Console untuk mode cloud.');
+  }
+  return deleteLocalUser(username);
 }

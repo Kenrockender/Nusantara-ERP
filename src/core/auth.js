@@ -18,6 +18,23 @@ import {
   EmailAuthProvider,
 } from 'firebase/auth';
 import { auth as fbAuth, isFirebaseConfigured } from '../config/firebase.js';
+import {
+  ensureUsers,
+  verifyUser,
+  setUserPassword,
+  recordLoginEvent,
+  getUserTwoFactor,
+  userHasTwoFactor,
+  saveUserTwoFactor,
+  hashBackupCode,
+  randomSalt,
+} from './local-users.js';
+import { generateSecret, verifyTOTP, otpauthURL } from './totp.js';
+
+// Number of one-time backup codes issued when 2FA is enabled.
+const BACKUP_CODE_COUNT = 8;
+// Holds a password-verified user awaiting their second factor (login step 2).
+let _pending2FA = null;
 
 // Use Firebase Auth when credentials are present and the SDK initialised.
 const _useFirebase = isFirebaseConfigured && !!fbAuth;
@@ -97,72 +114,16 @@ function firstAuthState() {
 
 // Session timeout (30 minutes of inactivity)
 const SESSION_TIMEOUT = 30 * 60 * 1000;
-const CREDS_KEY = 'erp_auth_creds';
 const SESSION_KEY = 'erp_session';
-const PBKDF2_ITERATIONS = 100000;
 
-// First-run default login. The user is prompted to change it after logging in.
-const DEFAULT_EMAIL = 'admin@nusantara.local';
+// First-run default login (username-based local auth). Each seeded user's
+// password is "<username>123" (see local-users.js). Shown as a hint on the
+// login screen until the password is changed.
+const DEFAULT_USERNAME = 'admin';
 const DEFAULT_PASSWORD = 'admin123';
 
 let sessionTimer = null;
 let currentUser = null;
-
-// ── Password hashing (PBKDF2 / SHA-256) ───────────────────────────────────────
-function bufToHex(buf) {
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function hexToBytes(hex) {
-  return Uint8Array.from(hex.match(/.{1,2}/g).map(h => parseInt(h, 16)));
-}
-
-function randomSalt() {
-  const a = new Uint8Array(16);
-  crypto.getRandomValues(a);
-  return bufToHex(a.buffer);
-}
-
-async function hashPassword(password, saltHex) {
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, [
-    'deriveBits',
-  ]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-    keyMaterial,
-    256
-  );
-  return bufToHex(bits);
-}
-
-// ── Credential storage ─────────────────────────────────────────────────────────
-function loadCreds() {
-  try {
-    const raw = localStorage.getItem(CREDS_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (_) {
-    /* ignore */
-  }
-  return null;
-}
-
-function saveCreds(creds) {
-  localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-}
-
-async function ensureCreds() {
-  let creds = loadCreds();
-  if (!creds || !creds.passwordHash) {
-    const salt = randomSalt();
-    const passwordHash = await hashPassword(DEFAULT_PASSWORD, salt);
-    creds = { email: DEFAULT_EMAIL, salt, passwordHash, mustChangePassword: true };
-    saveCreds(creds);
-  }
-  return creds;
-}
 
 // ── Session ──────────────────────────────────────────────────────────────────
 function getSession() {
@@ -181,8 +142,15 @@ function isSessionValid(s) {
   return Boolean(s) && Date.now() - (s.lastActivity || 0) <= SESSION_TIMEOUT;
 }
 
-function createSession(email) {
-  const s = { email, loginTime: Date.now(), lastActivity: Date.now() };
+function createSession(u) {
+  const s = {
+    username: u.username,
+    displayName: u.displayName || u.username,
+    role: u.role || 'admin',
+    mustChangePassword: !!u.mustChangePassword,
+    loginTime: Date.now(),
+    lastActivity: Date.now(),
+  };
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
 }
 
@@ -190,8 +158,18 @@ function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-function userFromEmail(email) {
-  return { uid: email, email, displayName: email.split('@')[0] };
+function userFromSession(s) {
+  const username = s.username || 'user';
+  return {
+    uid: username,
+    // email mirrors username so existing display/role code keeps working without
+    // an actual email address (full local auth — no email).
+    email: username,
+    username,
+    displayName: s.displayName || username,
+    role: s.role || 'admin',
+    mustChangePassword: !!s.mustChangePassword,
+  };
 }
 
 function startSessionTimer() {
@@ -222,28 +200,13 @@ export function resetSessionTimer() {
  * in), false when login is required.
  */
 export async function initAuth() {
-  await ensureCreds(); // keep local creds available for the fallback path
+  await ensureUsers(); // seed the default accounts on first run
 
-  // Firebase first: a persisted Firebase session means the user stays logged in
-  // and request.auth is populated for Firestore.
-  if (_useFirebase) {
-    try {
-      const u = await firstAuthState();
-      if (u) {
-        currentUser = mapFbUser(u);
-        _activeMode = 'firebase';
-        startSessionTimer();
-        return true;
-      }
-    } catch (e) {
-      console.warn('[Auth] Firebase init failed, falling back to local:', e);
-    }
-  }
-
-  // Local session fallback (covers non-Firebase mode and local-fallback logins).
+  // Full local auth (username/password). A valid local session keeps the user
+  // logged in across reloads.
   const s = getSession();
   if (isSessionValid(s)) {
-    currentUser = userFromEmail(s.email);
+    currentUser = userFromSession(s);
     _activeMode = 'local';
     startSessionTimer();
     return true;
@@ -262,31 +225,183 @@ export async function initAuth() {
  * account with write access. Firebase accounts must be created from the
  * Firebase Console / Admin SDK.
  */
-async function login(email, password) {
-  const mail = (email || '').trim();
-  if (_useFirebase) {
-    try {
-      await signInWithEmailAndPassword(fbAuth, mail, password);
-      return { ok: true, mode: 'firebase' };
-    } catch (e) {
-      const code = e.code || '';
-      if (UNREACHABLE.has(code)) {
-        // Firebase Auth not usable yet — keep the app working via local auth.
-        return localLogin(mail, password);
-      }
-      return { ok: false, msg: friendlyAuthError(code) };
-    }
-  }
-  return localLogin(mail, password);
+export async function login(username, password) {
+  return localLogin(username, password);
 }
 
-async function localLogin(email, password) {
-  const ok = await verifyCredentials(email, password);
-  if (ok) {
-    createSession((loadCreds() || {}).email || email);
-    return { ok: true, mode: 'local' };
+async function localLogin(username, password) {
+  const u = await verifyUser(username, password);
+  if (!u) {
+    return { ok: false, msg: 'Username atau password salah' };
   }
-  return { ok: false, msg: 'Email atau password salah' };
+  // Second factor: when the account has 2FA switched on, hold the verified
+  // identity and require a TOTP/backup code before creating the session.
+  if (userHasTwoFactor(u.username)) {
+    _pending2FA = { user: u };
+    return { ok: false, twoFactor: true, username: u.username };
+  }
+  finishLocalLogin(u);
+  return { ok: true, mode: 'local' };
+}
+
+// Create the session for an already-verified local user (post-password and, when
+// applicable, post-2FA).
+function finishLocalLogin(u) {
+  currentUser = userFromSession(u);
+  createSession(u);
+  _activeMode = 'local';
+  recordLoginEvent(u.username, u.displayName, 'login', 'local');
+}
+
+// ── Two-factor (TOTP) ──────────────────────────────────────────────────────────
+// 2FA config lives on each local user record (local-users.js):
+//   twoFactor = { enabled, secret, backupCodes: [{ salt, hash, used }] }
+// This gates the app UI after a correct password. See src/core/totp.js for the
+// threat-model note.
+
+// Verify a submitted value as EITHER a valid TOTP code OR an unused backup code.
+// A matched backup code is burned (marked used) so it can't be reused.
+async function verifySecondFactorValue(username, value) {
+  const tf = getUserTwoFactor(username);
+  if (!tf || !tf.secret) {
+    return false;
+  }
+  if (await verifyTOTP(tf.secret, value)) {
+    return true;
+  }
+  const codes = tf.backupCodes || [];
+  for (const entry of codes) {
+    if (entry.used) {
+      continue;
+    }
+    const hash = await hashBackupCode(value, entry.salt);
+    if (hash === entry.hash) {
+      entry.used = true;
+      saveUserTwoFactor(username, tf);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Complete a login's second factor for the user held from the password step.
+ * Returns { ok, msg }. On success the local session is created.
+ */
+export async function completeSecondFactor(token) {
+  if (!_pending2FA || !_pending2FA.user) {
+    return { ok: false, msg: 'Tidak ada proses login yang menunggu verifikasi 2FA' };
+  }
+  const u = _pending2FA.user;
+  const ok = await verifySecondFactorValue(u.username, token);
+  if (!ok) {
+    return { ok: false, msg: 'Kode 2FA salah atau sudah dipakai' };
+  }
+  _pending2FA = null;
+  finishLocalLogin(u);
+  return { ok: true };
+}
+
+/** Whether a second factor is pending (password accepted, awaiting 2FA code). */
+export function isAwaitingSecondFactor() {
+  return !!_pending2FA;
+}
+
+/** Discard a pending second factor (e.g. the user backs out of the 2FA step). */
+export function cancelSecondFactor() {
+  _pending2FA = null;
+}
+
+/** True when the signed-in user has 2FA switched on. */
+export function is2FAEnabled() {
+  return !!(currentUser && userHasTwoFactor(currentUser.username));
+}
+
+/** Status snapshot for the settings UI. */
+export function get2FAStatus() {
+  const tf = currentUser ? getUserTwoFactor(currentUser.username) : null;
+  return {
+    enabled: !!(tf && tf.enabled),
+    backupCodesRemaining: tf && tf.backupCodes ? tf.backupCodes.filter(c => !c.used).length : 0,
+  };
+}
+
+/** Start enrollment: returns a fresh secret + otpauth:// URL (encode into a QR). */
+export function begin2FAEnrollment() {
+  const secret = generateSecret();
+  const account = (currentUser && currentUser.username) || 'admin';
+  return { secret, otpauthUrl: otpauthURL(secret, { issuer: 'Nusantara ERP', account }) };
+}
+
+function newBackupCodes(n = BACKUP_CODE_COUNT) {
+  const codes = [];
+  for (let i = 0; i < n; i++) {
+    const a = new Uint8Array(5);
+    crypto.getRandomValues(a);
+    const hex = [...a].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    codes.push(hex.slice(0, 5) + '-' + hex.slice(5, 10)); // XXXXX-XXXXX
+  }
+  return codes;
+}
+
+async function encodeBackupCodes(plainCodes) {
+  return Promise.all(
+    plainCodes.map(async code => {
+      const salt = randomSalt();
+      return { salt, hash: await hashBackupCode(code, salt), used: false };
+    })
+  );
+}
+
+/**
+ * Finish enrollment: verify a live TOTP for `secret`, then switch 2FA on and
+ * issue one-time backup codes. Returns { backupCodes } (shown once).
+ */
+export async function enable2FA(secret, token) {
+  if (!currentUser || !currentUser.username) {
+    throw new Error('Tidak ada sesi aktif');
+  }
+  if (!(await verifyTOTP(secret, token))) {
+    throw new Error('Kode salah — pastikan jam perangkat & authenticator sinkron.');
+  }
+  const plainCodes = newBackupCodes();
+  saveUserTwoFactor(currentUser.username, {
+    enabled: true,
+    secret,
+    backupCodes: await encodeBackupCodes(plainCodes),
+  });
+  return { backupCodes: plainCodes };
+}
+
+/** Turn 2FA off. Requires the current password OR a valid 2FA/backup code. */
+export async function disable2FA(confirmValue) {
+  if (!currentUser || !currentUser.username) {
+    throw new Error('Tidak ada sesi aktif');
+  }
+  const okPassword = !!(await verifyUser(currentUser.username, confirmValue || ''));
+  const ok2fa = !okPassword && (await verifySecondFactorValue(currentUser.username, confirmValue));
+  if (!okPassword && !ok2fa) {
+    throw new Error('Konfirmasi salah — masukkan password atau kode 2FA yang benar.');
+  }
+  saveUserTwoFactor(currentUser.username, null);
+  return true;
+}
+
+/** Issue a new batch of backup codes (invalidates the old ones). Returns them. */
+export async function regenerateBackupCodes() {
+  if (!currentUser || !currentUser.username) {
+    throw new Error('Tidak ada sesi aktif');
+  }
+  const tf = getUserTwoFactor(currentUser.username);
+  if (!tf || !tf.enabled) {
+    throw new Error('2FA belum aktif.');
+  }
+  const plainCodes = newBackupCodes();
+  saveUserTwoFactor(currentUser.username, {
+    ...tf,
+    backupCodes: await encodeBackupCodes(plainCodes),
+  });
+  return { backupCodes: plainCodes };
 }
 
 export function getCurrentUser() {
@@ -346,19 +461,9 @@ export async function resendVerification() {
   return true;
 }
 
-/** Whether the current credentials are still the first-run default. */
+/** Whether the active user is still on their first-run default password. */
 export function mustChangePassword() {
-  const creds = loadCreds();
-  return Boolean(creds && creds.mustChangePassword);
-}
-
-async function verifyCredentials(email, password) {
-  const creds = await ensureCreds();
-  if ((email || '').trim().toLowerCase() !== creds.email.toLowerCase()) {
-    return false;
-  }
-  const hash = await hashPassword(password || '', creds.salt);
-  return hash === creds.passwordHash;
+  return Boolean(currentUser && currentUser.mustChangePassword);
 }
 
 /**
@@ -423,22 +528,19 @@ export function setupLoginScreen() {
     errorBox.textContent = msg;
   };
 
-  // Show the default-login hint until the password has been changed — but only
-  // in local (offline) mode. On a Firebase deployment the login page is public,
-  // so advertising any credentials there is a security hole.
-  const creds = loadCreds();
-  if (!_useFirebase && creds && creds.mustChangePassword && errorBox) {
+  // First-run hint: show the default admin credentials until the password is
+  // changed. Seeded users (firna / richard / lisa) sign in with "<username>123".
+  if (errorBox) {
     errorBox.style.display = 'block';
     errorBox.style.background = 'var(--surface)';
     errorBox.style.color = 'var(--muted)';
     errorBox.style.borderColor = 'var(--border)';
-    errorBox.textContent = `Login default — Email: ${DEFAULT_EMAIL} · Password: ${DEFAULT_PASSWORD}`;
+    errorBox.textContent = `Login default — Username: ${DEFAULT_USERNAME} · Password: ${DEFAULT_PASSWORD} (firna/richard/lisa: username + "123")`;
   }
 
-  // Prefill the default email only in local mode (no point hinting at account
-  // names on a public Firebase login page).
-  if (!_useFirebase && emailInput && !emailInput.value) {
-    emailInput.value = DEFAULT_EMAIL;
+  // Prefill the default username for convenience.
+  if (emailInput && !emailInput.value) {
+    emailInput.value = DEFAULT_USERNAME;
   }
 
   if (!form) {
@@ -456,20 +558,64 @@ export function setupLoginScreen() {
       submitBtn.textContent = 'Memproses...';
     }
 
-    try {
-      const result = await login(email, password);
-      if (result.ok) {
-        // Mark this browser as a returning user so the landing page's inline
-        // smart-skip script sends them straight to /app on future visits.
-        try {
-          localStorage.setItem('cf-returning', '1');
-        } catch (_) {
-          /* ignore (private mode / storage disabled) */
-        }
-        window.location.reload();
-        return;
+    const markReturningAndReload = () => {
+      // Mark this browser as a returning user so the landing page's inline
+      // smart-skip script sends them straight to /app on future visits.
+      try {
+        localStorage.setItem('cf-returning', '1');
+      } catch (_) {
+        /* ignore (private mode / storage disabled) */
       }
-      showError(result.msg || 'Email atau password salah');
+      window.location.reload();
+    };
+
+    try {
+      if (form.dataset.step === '2fa') {
+        // Step 2 — verify the second factor for the password-verified user.
+        const code = (document.getElementById('login-2fa') || {}).value || '';
+        const res = await completeSecondFactor(code);
+        if (res.ok) {
+          markReturningAndReload();
+          return;
+        }
+        showError(res.msg || 'Kode 2FA salah');
+      } else {
+        // Step 1 — username + password.
+        const result = await login(email, password);
+        if (result.ok) {
+          markReturningAndReload();
+          return;
+        }
+        if (result.twoFactor) {
+          // Password accepted — reveal the second-factor step.
+          form.dataset.step = '2fa';
+          const twoFaGroup = document.getElementById('login-2fa-group');
+          if (twoFaGroup) {
+            twoFaGroup.style.display = '';
+          }
+          document.getElementById('login-email')?.setAttribute('disabled', 'disabled');
+          document.getElementById('login-password')?.setAttribute('disabled', 'disabled');
+          if (errorBox) {
+            errorBox.style.display = 'block';
+            errorBox.style.background = 'var(--surface)';
+            errorBox.style.color = 'var(--muted)';
+            errorBox.style.borderColor = 'var(--border)';
+            errorBox.textContent =
+              'Masukkan kode 6 digit dari aplikasi authenticator (atau kode cadangan).';
+          }
+          const codeInput = document.getElementById('login-2fa');
+          if (codeInput) {
+            codeInput.value = '';
+            codeInput.focus();
+          }
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Verifikasi';
+          }
+          return;
+        }
+        showError(result.msg || 'Email atau password salah');
+      }
     } catch (err) {
       console.error('Login error:', err);
       showError('Terjadi kesalahan saat login');
@@ -477,7 +623,7 @@ export function setupLoginScreen() {
 
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Sign In';
+      submitBtn.textContent = form.dataset.step === '2fa' ? 'Verifikasi' : 'Sign In';
     }
   });
 
@@ -492,8 +638,12 @@ export async function logout(message) {
     clearTimeout(sessionTimer);
     sessionTimer = null;
   }
+  if (currentUser && currentUser.username) {
+    recordLoginEvent(currentUser.username, currentUser.displayName, 'logout', 'local');
+  }
   clearSession();
   currentUser = null;
+  _pending2FA = null;
   if (_useFirebase && fbAuth) {
     try {
       await signOut(fbAuth);
@@ -516,28 +666,21 @@ export async function changePassword(currentPassword, newPassword) {
   if (!newPassword || newPassword.length < 6) {
     throw new Error('Password baru harus minimal 6 karakter');
   }
-
-  // Firebase-authenticated session: reauthenticate, then update via Firebase.
-  if (_activeMode === 'firebase' && _useFirebase && fbAuth && fbAuth.currentUser) {
-    const user = fbAuth.currentUser;
-    try {
-      const cred = EmailAuthProvider.credential(user.email, currentPassword || '');
-      await reauthenticateWithCredential(user, cred);
-    } catch {
-      throw new Error('Password lama salah');
-    }
-    await updatePassword(user, newPassword);
-    return true;
+  if (!currentUser || !currentUser.username) {
+    throw new Error('Tidak ada sesi aktif');
   }
-
-  const creds = await ensureCreds();
-  const currentHash = await hashPassword(currentPassword || '', creds.salt);
-  if (currentHash !== creds.passwordHash) {
+  // Verify the current password against the stored hash before changing it.
+  const ok = await verifyUser(currentUser.username, currentPassword || '');
+  if (!ok) {
     throw new Error('Password lama salah');
   }
-
-  const salt = randomSalt();
-  const passwordHash = await hashPassword(newPassword, salt);
-  saveCreds({ ...creds, salt, passwordHash, mustChangePassword: false });
+  await setUserPassword(currentUser.username, newPassword);
+  currentUser.mustChangePassword = false;
+  // Reflect the cleared flag in the persisted session too.
+  const s = getSession();
+  if (s) {
+    s.mustChangePassword = false;
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  }
   return true;
 }

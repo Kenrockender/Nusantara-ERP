@@ -43,21 +43,21 @@
         icon: '📊',
         name: 'Laporan Laba Rugi (P&L)',
         desc: 'Pendapatan dan beban per periode',
-        view: 'pl',
+        action: 'openFinPL',
       },
       {
         cat: 'Keuangan',
         icon: '📋',
         name: 'Neraca (Balance Sheet)',
         desc: 'Posisi aset, kewajiban, dan ekuitas',
-        view: 'balance',
+        action: 'openFinBS',
       },
       {
         cat: 'Keuangan',
         icon: '💸',
         name: 'Laporan Arus Kas',
         desc: 'Cash flow operasional, investasi, pendanaan',
-        view: 'cashflow',
+        action: 'openFinCF',
       },
       {
         cat: 'Penjualan',
@@ -71,7 +71,7 @@
         icon: '📄',
         name: 'Invoice Terhutang',
         desc: 'Daftar piutang yang belum dilunasi',
-        view: 'sales',
+        view: 'invoices',
       },
       {
         cat: 'Pembelian',
@@ -85,7 +85,7 @@
         icon: '💳',
         name: 'Hutang Dagang',
         desc: 'Daftar kewajiban ke supplier',
-        view: 'purchase',
+        view: 'invoices',
       },
       {
         cat: 'Persediaan',
@@ -109,20 +109,6 @@
         action: 'openSPTPPN',
       },
       {
-        cat: 'Pajak',
-        icon: '📑',
-        name: 'SPT PPN / PPNBM',
-        desc: 'Persiapan pelaporan SPT Masa PPN',
-        action: 'openSPTPPN',
-      },
-      {
-        cat: 'Analitik',
-        icon: '🤖',
-        name: 'AI Business Analysis',
-        desc: 'Insight otomatis dari data bisnis Anda',
-        action: 'openAIAnalysis',
-      },
-      {
         cat: 'Umum Ledger',
         icon: '📔',
         name: 'Audit Journal',
@@ -144,50 +130,86 @@
       cats[r.cat].push(r);
     });
 
-    var cards = Object.keys(cats)
+    function reportCard(r) {
+      var search = esc((r.name + ' ' + r.desc + ' ' + r.cat).toLowerCase());
+      return (
+        '<button class="report-card-item" data-search="' +
+        search +
+        '" ' +
+        (r.action
+          ? 'data-action="' + r.action + '"'
+          : 'data-action="navView" data-view="' + esc(r.view || '') + '"') +
+        ' style="display:flex;align-items:center;gap:11px;padding:12px 13px;border:1px solid var(--border);border-radius:10px;cursor:pointer;background:var(--surface);text-align:left;width:100%;transition:border-color .15s,box-shadow .15s" ' +
+        "onmouseenter=\"this.style.borderColor='var(--primary,#2563eb)';this.style.boxShadow='0 2px 8px rgba(0,0,0,.06)'\" " +
+        "onmouseleave=\"this.style.borderColor='var(--border)';this.style.boxShadow='none'\">" +
+        '<span style="font-size:22px;flex:none">' +
+        r.icon +
+        '</span>' +
+        '<span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:700">' +
+        esc(r.name) +
+        '</span><span style="display:block;font-size:11px;color:var(--muted)">' +
+        esc(r.desc) +
+        '</span></span>' +
+        '<svg style="flex:none;color:var(--muted)" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>' +
+        '</button>'
+      );
+    }
+
+    var sections = Object.keys(cats)
       .map(function (cat) {
-        var items = cats[cat]
-          .map(function (r) {
-            return (
-              '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background .15s" ' +
-              'onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'" ' +
-              (r.action
-                ? 'data-action="' + r.action + '"'
-                : 'data-action="navView" data-view="' + esc(r.view || '') + '"') +
-              '>' +
-              '<span style="font-size:20px">' +
-              r.icon +
-              '</span>' +
-              '<div><div style="font-size:13px;font-weight:600">' +
-              esc(r.name) +
-              '</div>' +
-              '<div style="font-size:11px;color:var(--muted)">' +
-              esc(r.desc) +
-              '</div></div>' +
-              '<svg style="margin-left:auto;flex:none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>' +
-              '</div>'
-            );
-          })
-          .join('');
+        var items = cats[cat].map(reportCard).join('');
         return (
-          '<div class="card" style="margin-bottom:14px">' +
-          '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">' +
+          '<div class="report-cat-block" style="margin-bottom:18px">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">' +
+          '<span style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">' +
           esc(cat) +
+          '</span>' +
+          '<span style="font-size:10px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:99px;padding:1px 8px">' +
+          cats[cat].length +
+          '</span>' +
           '</div>' +
+          '<div class="report-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">' +
           items +
+          '</div>' +
           '</div>'
         );
       })
       .join('');
 
     injectView(
-      '<div class="sec-hdr"><div><h1>Report List</h1><p>Semua laporan yang tersedia dalam sistem Nusantara ERP</p></div>' +
-        '<button class="btn" data-action="openAIAnalysis">🤖 AI Analysis</button></div>' +
-        '<div style="max-width:720px">' +
-        cards +
+      '<div class="sec-hdr"><div><h1>Report List</h1><p>' +
+        reports.length +
+        ' laporan tersedia dalam sistem Nusantara ERP</p></div></div>' +
+        '<div style="position:relative;max-width:380px;margin-bottom:18px">' +
+        '<svg style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted)" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+        '<input id="report-search" type="text" placeholder="Cari laporan…" autocomplete="off" ' +
+        'style="width:100%;padding:9px 12px 9px 34px;border:1px solid var(--border);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text)">' +
+        '</div>' +
+        '<div id="report-list-body">' +
+        sections +
+        '<div id="report-empty" style="display:none;padding:30px;text-align:center;color:var(--muted);font-size:13px">Tidak ada laporan yang cocok dengan pencarian.</div>' +
         '</div>'
     );
   }
+
+  // Live-filter the report list as the user types (no re-render, keeps focus).
+  document.addEventListener('input', function (e) {
+    if (!e.target || e.target.id !== 'report-search') return;
+    var q = e.target.value.trim().toLowerCase();
+    var anyVisible = false;
+    document.querySelectorAll('.report-card-item').forEach(function (card) {
+      var match = !q || (card.dataset.search || '').indexOf(q) !== -1;
+      card.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    // Hide category blocks whose cards are all filtered out.
+    document.querySelectorAll('.report-cat-block').forEach(function (block) {
+      var visible = block.querySelectorAll('.report-card-item:not([style*="display: none"])').length;
+      block.style.display = visible ? '' : 'none';
+    });
+    var empty = document.getElementById('report-empty');
+    if (empty) empty.style.display = anyVisible ? 'none' : '';
+  });
 
   // ══════════════════════════════════════════════════════════════════════════
   // § 2  SPT PPN / PPNBM
@@ -794,6 +816,17 @@
         }
         break;
       }
+      // Financial reports are tabs inside the 'financials' view — open the right
+      // tab via the financial module rather than navigating to a non-existent view.
+      case 'openFinPL':
+        if (window._financialExtras) window._financialExtras.openPL();
+        break;
+      case 'openFinBS':
+        if (window._financialExtras) window._financialExtras.openBS();
+        break;
+      case 'openFinCF':
+        if (window._financialExtras) window._financialExtras.openCF();
+        break;
       case 'exportSPT': {
         toast('Export SPT sedang disiapkan...', 'success');
         setTimeout(function () {
