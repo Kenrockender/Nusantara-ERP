@@ -72,3 +72,6 @@ Logo NSA 2.0 Full.png
 # Firebase Admin service account key (full admin access — NEVER commit)
 serviceAccount.json
 serviceAccount*.json
+
+# Local DB backup export — never commit (may contain business data)
+backup-nusantara.json
