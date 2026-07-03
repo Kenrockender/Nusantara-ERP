@@ -75,3 +75,5 @@ serviceAccount*.json
 
 # Local DB backup export — never commit (may contain business data)
 backup-nusantara.json
+
+.vercel

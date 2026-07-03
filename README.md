@@ -11,7 +11,7 @@ A modern, lightweight Enterprise Resource Planning (ERP) system built for Nusant
 - 🛡️ **Data integrity**: audit trail, accounting period lock, and ledger self-check
 - 🔐 **RBAC + optional 2FA**: 5-role access control and TOTP two-factor auth
 - 🌐 **Bilingual UI**: Indonesian ⇄ English toggle (i18n)
-- 🔌 **Integration API**: read-only `/api/v1` (Vercel serverless, API-key auth)
+- 🔌 **Integration API**: read-only `/api/v1` (Firebase Cloud Functions, API-key auth)
 - 📦 **Modular architecture**: ES modules + a single concatenated classic bundle
 - 📱 **PWA**: installable, offline-capable
 
@@ -208,7 +208,7 @@ npm run test:run -- --clearCache
 - [x] Two-factor authentication (2FA) — optional TOTP (authenticator apps) + one-time backup codes
 - [x] Multi-language support — Indonesian / English UI toggle (i18n)
 - [x] PDF export for invoices & reports
-- [x] Read-only integration API (Vercel serverless + API-key auth)
+- [x] Read-only integration API (Firebase Cloud Functions + API-key auth)
 
 ### Planned 📋
 

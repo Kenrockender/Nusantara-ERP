@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleApi, safeEqual, READABLE } from '../api/_lib/handler.js';
+import { handleApi, safeEqual, READABLE } from '../functions/handler.js';
 
 const API_KEY = 'test-secret-key';
 

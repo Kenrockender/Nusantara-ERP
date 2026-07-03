@@ -104,19 +104,23 @@ Sebagian besar sudah ada di Nusantara. `financial-reports.js` sudah punya
    core Nusantara; tidak bentrok dengan `order-summary.js`.
 3. ✅ Classic-bundle smoke test hijau (bundle memuat kedua file tanpa error).
 
-## Fase 6 — Integration API + deploy Vercel — ✅ SELESAI
+## Fase 6 — Integration API — ✅ SELESAI (Firebase Cloud Functions)
 
-1. ✅ `api/v1/*` + `api/_lib/*` disalin (rebrand header handler). Koleksi READABLE
-   generik (customers/suppliers/items/orders/invoices/DO).
-2. ✅ `vercel.json` ditambah (build `npm run build`, output `dist/`, rewrites `/app`).
-3. ✅ `firebase-admin` dipindah ke `dependencies` (wajib untuk serverless).
-4. ✅ Docs `API.md` + `DEPLOYMENT.md` disalin. Env: `ERP_API_KEY`,
-   `FIREBASE_SERVICE_ACCOUNT`, `FIRESTORE_DATABASE_ID`.
-5. ✅ Tes `tests/api-handler.test.ts` (11) — auth key, discovery, resource,
-   limit clamp, method guard. **211 pass total.**
+**Koreksi arah:** Nusantara hosting = **Firebase Hosting** (`firebase.json` punya blok
+`hosting`), bukan Vercel seperti NSA. API Vercel-serverless yang sempat diport
+**diganti** ke **Firebase Cloud Functions** agar cocok dengan target deploy.
 
-**Catatan:** deploy Vercel aktual belum dijalankan (butuh login Vercel + set env di
-sesi interaktif); konfigurasi mengikuti setup NSA yang sudah berjalan.
+1. ✅ Logika inti (`handler.js` framework-agnostic) dipakai ulang di `functions/`.
+2. ✅ `functions/index.js` — HTTPS `onRequest` yang mengurai slug resource dari path.
+3. ✅ `functions/firestore.js` — akses Firestore via ADC bawaan runtime Functions.
+4. ✅ `firebase.json` — blok `functions` + rewrite `/api/**` → function `api`
+   (sebelum catch-all `**`).
+5. ✅ File Vercel (`api/`, `vercel.json`) dihapus; `firebase-admin` dikembalikan ke
+   devDependencies (main app tak butuh runtime).
+6. ✅ Tes `tests/api-handler.test.ts` (11) diarahkan ke `functions/handler.js`.
+7. ⏳ **Deploy function tertunda**: project `nusantara-erp` masih plan **Spark**;
+   Cloud Functions butuh **Blaze**. Kode & config siap — deploy tinggal
+   `firebase deploy --only functions` setelah Blaze aktif + set env `ERP_API_KEY`.
 
 ## Fase 7 — Finalisasi — ✅ SELESAI
 
@@ -141,7 +145,7 @@ sesi interaktif); konfigurasi mengikuti setup NSA yang sudah berjalan.
 | 3 | i18n ID⇄EN | ✅ DOM-sweep translator |
 | 4 | PDF export | ✅ invoice invPrint (report sudah ada) |
 | 5 | UI tabs (view/doc) | ✅ |
-| 6 | Integration API + Vercel | ✅ (deploy aktual belum dijalankan) |
+| 6 | Integration API (Firebase Functions) | ✅ kode siap; deploy function butuh Blaze |
 | 7 | Finalisasi | ✅ |
 
 **Belum di-commit** — semua di branch `feat/parity-nsa`. Test: 172 → **211**.
