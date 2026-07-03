@@ -2,13 +2,16 @@
 
 A modern, lightweight Enterprise Resource Planning (ERP) system built for Nusantara businesses. Local-first by design — data lives in IndexedDB on the device — with an optional Firebase backend for cloud sync when configured.
 
-## 🚀 Version 3.0.0
+## 🚀 Version 3.1.0
 
 **Highlights:**
 
 - 💾 **Local-first storage**: full dataset persists in IndexedDB (works without any backend)
 - 🔥 **Optional Firestore sync**: real-time sync across devices when Firebase is configured
 - 🛡️ **Data integrity**: audit trail, accounting period lock, and ledger self-check
+- 🔐 **RBAC + optional 2FA**: 5-role access control and TOTP two-factor auth
+- 🌐 **Bilingual UI**: Indonesian ⇄ English toggle (i18n)
+- 🔌 **Integration API**: read-only `/api/v1` (Vercel serverless, API-key auth)
 - 📦 **Modular architecture**: ES modules + a single concatenated classic bundle
 - 📱 **PWA**: installable, offline-capable
 
@@ -118,6 +121,7 @@ nusantara-erp/
 ## 🔐 Security
 
 - **Firebase Authentication** - Email/password authentication with secure session management
+- **Two-Factor Auth (optional)** - RFC 6238 TOTP (Google Authenticator/Authy/etc.) + one-time backup codes. App-level second factor stored in the local per-user credential store; gates the app UI after a correct password. Fits the local-first, per-operator deployment.
 - **Firestore Security Rules** - Row-level security for data access
 - **Storage Rules** - Secure file upload/download
 - **Session Timeout** - Auto logout after 30 minutes inactivity
@@ -167,6 +171,8 @@ npm run test:run -- --clearCache
 | **[PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)**               | Detailed project structure                 |
 | **[docs/IMPROVEMENTS.md](./docs/IMPROVEMENTS.md)**               | v2.1.0 improvements details                |
 | **[docs/FIREBASE_AUTH_SETUP.md](./docs/FIREBASE_AUTH_SETUP.md)** | 🔐 Firebase Authentication setup guide     |
+| **[docs/API.md](./docs/API.md)**                                 | 🔌 Integration API (read-only) reference   |
+| **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**                   | 🚀 Deploy + production data runbook        |
 | **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)**               | System architecture                        |
 | **[docs/ARCHITECTURE_ERP_V4.md](./docs/ARCHITECTURE_ERP_V4.md)** | V4 document-flow engine plan               |
 | **[docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**                 | Development guide                          |
@@ -175,10 +181,10 @@ npm run test:run -- --clearCache
 
 ## 🔄 Version
 
-**Version:** 3.0.0  
-**Last Updated:** June 10, 2026  
+**Version:** 3.1.0  
+**Last Updated:** July 3, 2026  
 **Firebase SDK:** 12.12.0  
-**Vite:** 7.1.0  
+**Vite:** 8.0.16  
 **Node.js:** 20.19.0+
 
 ## 🛣️ Roadmap
@@ -198,14 +204,16 @@ npm run test:run -- --clearCache
 - [x] File-based backup/restore (export/import JSON)
 - [x] OS notifications (overdue invoices, low stock)
 - [x] Transaction rollback system
+- [x] Role-based access control (RBAC) — 5 roles + pending, Firestore-enforced
+- [x] Two-factor authentication (2FA) — optional TOTP (authenticator apps) + one-time backup codes
+- [x] Multi-language support — Indonesian / English UI toggle (i18n)
+- [x] PDF export for invoices & reports
+- [x] Read-only integration API (Vercel serverless + API-key auth)
 
 ### Planned 📋
 
-- [ ] Role-based access control (RBAC)
-- [ ] PDF export for invoices & reports
-- [ ] Two-factor authentication (2FA)
-- [ ] Multi-language support
-- [ ] API for integrations
+- [ ] Write endpoints for the integration API
+- [ ] Accurate-style nested document tabs polish
 
 ---
 

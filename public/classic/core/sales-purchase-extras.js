@@ -781,9 +781,8 @@
         if (doPost) {
           var invItems = db().inventoryItems || [];
           items.forEach(function (ri) {
-            var inv = invItems.find(function (i) {
-              return i.id === ri.itemId || i.name === ri.itemName;
-            });
+            var inv = invItems.find(function (i) { return i.id === ri.itemId; });
+            if (!inv && ri.itemName) inv = invItems.find(function (i) { return i.name === ri.itemName; });
             if (inv) {
               inv.stock = (inv.stock || 0) + ri.qty;
               if (inv.warehouseStock) {

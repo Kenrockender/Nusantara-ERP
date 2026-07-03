@@ -71,13 +71,11 @@
       color: '#3B82F6',
       items: [
         { icon: 'home', label: 'Profil Perusahaan', view: 'settings' },
-        { icon: 'dollar-sign', label: 'Currency', view: 'settings' },
         { icon: 'percent', label: 'Tax', view: 'tax' },
         { icon: 'clock', label: 'Payment Term', view: 'settings' },
         { icon: 'truck', label: 'Shipment', view: 'settings' },
         { icon: 'users', label: 'Employee', view: 'master' },
         { icon: 'user', label: 'Contact', view: 'master' },
-        { icon: 'star', label: 'Favorite Transaction', view: 'settings' },
         { icon: 'calendar', label: 'Calendar', view: 'settings' },
         { icon: 'activity', label: 'Activity Log', view: 'settings' },
         { icon: 'trash-2', label: 'Recycle Bin', view: 'settings' },
@@ -108,7 +106,6 @@
         { icon: 'arrow-up-right', label: 'Other Payment', view: 'finance' },
         { icon: 'arrow-down-left', label: 'Other Deposit', view: 'finance' },
         { icon: 'repeat', label: 'Bank Transfer', view: 'finance' },
-        { icon: 'smartphone', label: 'SmartLink e-Banking', view: 'finance' },
         { icon: 'file-text', label: 'Bank Statement', view: 'finance' },
         { icon: 'clock', label: 'Bank History', view: 'finance' },
         { icon: 'check-square', label: 'Bank Reconcile', view: 'finance' },
@@ -128,7 +125,6 @@
         { icon: 'tag', label: 'Customer Category', view: 'master' },
         { icon: 'tag', label: 'Sales Category', view: 'sales' },
         { icon: 'user', label: 'Customer', view: 'master' },
-        { icon: 'trending-up', label: 'Sales Target', view: 'sales' },
       ],
     },
     purchases: {
@@ -176,15 +172,6 @@
         { icon: 'map-pin', label: 'Asset per Location', view: 'assets' },
       ],
     },
-    tax: {
-      title: 'SmartLink Tax',
-      color: '#3B82F6',
-      items: [
-        { icon: 'file-text', label: 'e-Faktur CTAS', view: 'tax' },
-        { icon: 'mail', label: 'Tax Invoice Email', view: 'tax' },
-        { icon: 'file', label: 'e-Faktur Legacy', view: 'tax' },
-      ],
-    },
     reports: {
       title: 'Reports',
       color: '#F97316',
@@ -193,8 +180,6 @@
         { icon: 'pie-chart', label: 'Laba Rugi (P/L)', view: 'financials' },
         { icon: 'bar-chart-2', label: 'Neraca (Balance Sheet)', view: 'financials' },
         { icon: 'activity', label: 'Arus Kas (Cash Flow)', view: 'financials' },
-        { icon: 'file', label: 'SPT PPN / PPNBM', view: 'reports' },
-        { icon: 'cpu', label: 'AI Analysis', view: 'reports' },
       ],
     },
   };
@@ -280,6 +265,10 @@
   // Current sub-nav state. `_activeFlyout` holds the menu group whose items are
   // currently shown in the contextual sub-nav panel (second tier).
   let _activeFlyout = null;
+  // Label of the flyout item the user actually clicked, so navigate() highlights
+  // that exact item — not every item that happens to share the same data-view
+  // (many menu items route to the same view, e.g. several → 'settings').
+  let _pendingItemLabel = null;
 
   // True when the viewport is narrow enough that the sub-nav is an overlay flyout
   // rather than a docked column (must match the <=900px CSS breakpoint).
@@ -484,6 +473,9 @@
         document.querySelectorAll('.flyout-item').forEach(b => {
           b.classList.toggle('active', b === flyoutItem);
         });
+        // Remember exactly which item was clicked so the navigate() sync below
+        // doesn't fall back to highlighting every item with the same view.
+        _pendingItemLabel = itemLabel;
         if (viewId) {
           // Menu-coverage may fully handle the click (real feature route, or an
           // honest "in development" placeholder). Otherwise navigate normally.
@@ -687,6 +679,10 @@
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
       'Ganti Password' +
       '</button>' +
+      '<button class="user-menu-item" data-user-action="manage2FA">' +
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>' +
+      'Verifikasi 2 Langkah' +
+      '</button>' +
       '<button class="user-menu-item" data-user-action="manageBackup">' +
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
       'Kelola Backup' +
@@ -697,6 +693,13 @@
       '<button class="user-menu-item" data-user-action="installPwaApp">' +
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/><polyline points="9 9 12 12 15 9"/><line x1="12" y1="12" x2="12" y2="5"/></svg>' +
       'Install Aplikasi' +
+      '</button>' +
+      '<button class="user-menu-item" data-user-action="toggleLang">' +
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' +
+      'Bahasa' +
+      '<span style="margin-left:auto;font-size:10px;font-weight:700;color:var(--muted)">' +
+      (window.I18N && window.I18N.getLang && window.I18N.getLang() === 'en' ? 'EN' : 'ID') +
+      '</span>' +
       '</button>' +
       '<div style="border-top:1px solid var(--border);margin:4px 0"></div>' +
       '<button class="user-menu-item" data-user-action="logout" style="color:#EF4444">' +
@@ -911,6 +914,10 @@
       ERP.registry.actions.get('editIdentity')();
     } else if (action === 'changePassword' && ERP.registry.actions.has('changePassword')) {
       ERP.registry.actions.get('changePassword')();
+    } else if (action === 'manage2FA' && ERP.registry.actions.has('manage2FA')) {
+      ERP.registry.actions.get('manage2FA')();
+    } else if (action === 'toggleLang' && window.I18N && window.I18N.toggleLang) {
+      window.I18N.toggleLang();
     } else if (action === 'manageBackup' && ERP.registry.actions.has('manageBackup')) {
       ERP.registry.actions.get('manageBackup')();
     } else if (action === 'installPwaApp' && ERP.registry.actions.has('installPwaApp')) {
@@ -1006,9 +1013,21 @@
             _showSubnav();
           }
         }
-        document.querySelectorAll('.flyout-item').forEach(b => {
-          b.classList.toggle('active', b.dataset.view === id);
-        });
+        // Highlight a SINGLE item: the one the user clicked (matched by label),
+        // else the first item routing to this view (for programmatic navigation
+        // from search / notifications / menu-router). Without this, every item
+        // sharing the view lights up at once.
+        const lbl = _pendingItemLabel;
+        _pendingItemLabel = null;
+        const items = Array.from(document.querySelectorAll('.flyout-item'));
+        let chosen = null;
+        if (lbl) {
+          chosen = items.find(b => b.dataset.view === id && b.dataset.label === lbl);
+        }
+        if (!chosen) {
+          chosen = items.find(b => b.dataset.view === id);
+        }
+        items.forEach(b => b.classList.toggle('active', b === chosen));
       } else {
         _hideSubnav();
         _activeFlyout = parentMenu;

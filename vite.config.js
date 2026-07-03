@@ -42,11 +42,19 @@ export const classicOrder = [
   'public/classic/core/adjust-view.js',
   'public/classic/core/invoice-view.js',
   'public/classic/core/excel-import.js',
+  'public/classic/core/order-summary.js',
   'public/classic/core/doc-flow.js',
   'public/classic/core/schema.js',
   'public/classic/modules/dashboard.js',
   'public/classic/modules/master.js',
   'public/classic/ui/nav.js',
+  // view-tabs.js wraps nav.js's navigate (must be after it, before rbac.js so
+  // the rbac navigate guard stays outermost). Adds the multi-tab view bar.
+  'public/classic/ui/view-tabs.js',
+  // doc-tabs.js adds Accurate-style second-level tabs INSIDE each transaction
+  // module (Daftar / Data Baru / one tab per open document). After view-tabs.js
+  // and before rbac.js.
+  'public/classic/ui/doc-tabs.js',
   'public/classic/modules/settings.js',
   // rbac.js MUST load last: its saveDB wrap is the outermost guard (reverts an
   // unauthorized mutation before integrity.js/trash.js inner wraps run), and it

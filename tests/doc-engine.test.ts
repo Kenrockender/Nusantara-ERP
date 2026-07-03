@@ -159,7 +159,8 @@ describe('DocEngine.statusLabel & getFromSources', () => {
   });
 
   it('reports Get-From sources', () => {
-    expect(window.DocEngine.getFromSources('DO')).toEqual(['SO']);
+    // DO can be created from either a Sales Order or a Purchase Order.
+    expect(window.DocEngine.getFromSources('DO')).toEqual(['SO', 'PO']);
     // SO now has getFrom: ['SQ'] (Sales Quotation → Sales Order).
     expect(window.DocEngine.getFromSources('SO')).toEqual(['SQ']);
   });

@@ -359,6 +359,159 @@ function showChangePassword() {
   }, 50);
 }
 
+// ── Two-Factor Authentication (TOTP) ───────────────────────────────────────────
+function _groupSecret(s) {
+  return String(s || '').replace(/(.{4})/g, '$1 ').trim();
+}
+
+function _backupCodesHtml(codes) {
+  return (
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:monospace;font-size:14px;' +
+    'padding:14px;background:var(--bg);border:1px dashed var(--border);border-radius:10px;margin:12px 0">' +
+    codes
+      .map(c => '<div style="text-align:center;letter-spacing:1px">' + escapeHtml(c) + '</div>')
+      .join('') +
+    '</div>'
+  );
+}
+
+function _showBackupCodes(codes, note) {
+  openModal(
+    'Kode Cadangan 2FA',
+    '<p style="font-size:13px;color:var(--muted);margin-bottom:4px">' +
+      (note || 'Simpan kode berikut di tempat aman.') +
+      ' Setiap kode hanya bisa dipakai <strong>satu kali</strong> jika kamu kehilangan akses ke aplikasi authenticator.</p>' +
+      _backupCodesHtml(codes) +
+      '<div style="font-size:12px;color:var(--danger)">⚠️ Kode ini tidak akan ditampilkan lagi.</div>',
+    '<button class="btn-ghost" data-action="closeModal">Tutup</button>' +
+      '<button class="btn" id="tfa-copy-codes">Salin Semua</button>'
+  );
+  setTimeout(() => {
+    document.getElementById('tfa-copy-codes')?.addEventListener('click', () => {
+      try {
+        navigator.clipboard.writeText(codes.join('\n'));
+        showToast('Kode cadangan disalin', 'success');
+      } catch (_) {
+        showToast('Gagal menyalin — salin manual', 'warning');
+      }
+    });
+  }, 50);
+}
+
+function showTwoFactorEnroll() {
+  const { secret, otpauthUrl } = window.erpAuth.begin2FAEnrollment();
+  openModal(
+    'Aktifkan Verifikasi 2 Langkah',
+    '<ol style="font-size:13px;color:var(--text);padding-left:18px;margin:0 0 12px;line-height:1.8">' +
+      '<li>Buka aplikasi authenticator (Google Authenticator, Authy, dll).</li>' +
+      '<li>Pilih <strong>“Enter a setup key”</strong> lalu masukkan kunci di bawah.</li>' +
+      '<li>Masukkan kode 6 digit yang muncul untuk mengonfirmasi.</li>' +
+      '</ol>' +
+      '<label class="form-label">Kunci Setup (manual)</label>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+      '<code id="tfa-secret" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);' +
+      'border-radius:10px;font-size:15px;letter-spacing:2px;user-select:all">' +
+      _groupSecret(secret) +
+      '</code>' +
+      '<button class="btn-ghost" id="tfa-copy-secret" type="button">Salin</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:14px;word-break:break-all">Atau buka URI: ' +
+      '<a href="' +
+      escapeHtml(otpauthUrl) +
+      '" style="color:var(--primary)">' +
+      escapeHtml(otpauthUrl) +
+      '</a></div>' +
+      '<div class="form-group"><label class="form-label">Kode Verifikasi (6 digit)</label>' +
+      '<input class="form-input" id="tfa-token" inputmode="numeric" autocomplete="one-time-code" ' +
+      'placeholder="123456" maxlength="6" style="letter-spacing:4px;text-align:center;font-size:18px"></div>',
+    '<button class="btn-ghost" data-action="closeModal">Batal</button>' +
+      '<button class="btn" id="tfa-confirm">Aktifkan</button>'
+  );
+  setTimeout(() => {
+    document.getElementById('tfa-copy-secret')?.addEventListener('click', () => {
+      try {
+        navigator.clipboard.writeText(secret);
+        showToast('Kunci disalin', 'success');
+      } catch (_) {
+        showToast('Gagal menyalin', 'warning');
+      }
+    });
+    document.getElementById('tfa-confirm')?.addEventListener('click', async () => {
+      const token = (document.getElementById('tfa-token')?.value || '').trim();
+      if (!token) {
+        showToast('Masukkan kode 6 digit', 'warning');
+        return;
+      }
+      try {
+        const { backupCodes } = await window.erpAuth.enable2FA(secret, token);
+        closeModal();
+        showToast('Verifikasi 2 langkah aktif', 'success');
+        _showBackupCodes(backupCodes, 'Kode cadangan baru dibuat.');
+      } catch (err) {
+        showToast(err.message || 'Gagal mengaktifkan 2FA', 'danger');
+      }
+    });
+    document.getElementById('tfa-token')?.focus();
+  }, 50);
+}
+
+function showTwoFactorManage() {
+  const status = window.erpAuth.get2FAStatus();
+  openModal(
+    'Verifikasi 2 Langkah',
+    '<div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg);border-radius:10px;margin-bottom:14px">' +
+      '<div style="width:36px;height:36px;border-radius:50%;background:var(--success,#10B981)22;display:flex;align-items:center;justify-content:center">✅</div>' +
+      '<div><div style="font-size:14px;font-weight:700">2FA Aktif</div>' +
+      '<div style="font-size:12px;color:var(--muted)">' +
+      status.backupCodesRemaining +
+      ' kode cadangan tersisa</div></div></div>' +
+      '<p style="font-size:12px;color:var(--muted)">Nonaktifkan 2FA atau buat ulang kode cadangan. ' +
+      'Konfirmasi dengan password atau kode 2FA.</p>' +
+      '<div class="form-group" style="margin-top:12px"><label class="form-label">Konfirmasi (password / kode 2FA)</label>' +
+      '<input class="form-input" id="tfa-confirm-val" type="password" autocomplete="current-password"></div>',
+    '<button class="btn-ghost" data-action="closeModal">Tutup</button>' +
+      '<button class="btn-ghost" id="tfa-regen">Buat Ulang Kode</button>' +
+      '<button class="btn" id="tfa-disable" style="background:var(--danger);border-color:var(--danger)">Nonaktifkan</button>'
+  );
+  setTimeout(() => {
+    document.getElementById('tfa-regen')?.addEventListener('click', async () => {
+      try {
+        const { backupCodes } = await window.erpAuth.regenerateBackupCodes();
+        closeModal();
+        _showBackupCodes(backupCodes, 'Kode cadangan lama dibatalkan.');
+      } catch (err) {
+        showToast(err.message || 'Gagal', 'danger');
+      }
+    });
+    document.getElementById('tfa-disable')?.addEventListener('click', async () => {
+      const val = (document.getElementById('tfa-confirm-val')?.value || '').trim();
+      if (!val) {
+        showToast('Masukkan password atau kode 2FA untuk konfirmasi', 'warning');
+        return;
+      }
+      try {
+        await window.erpAuth.disable2FA(val);
+        closeModal();
+        showToast('Verifikasi 2 langkah dinonaktifkan', 'success');
+      } catch (err) {
+        showToast(err.message || 'Gagal menonaktifkan', 'danger');
+      }
+    });
+  }, 50);
+}
+
+function showTwoFactor() {
+  if (!window.erpAuth || typeof window.erpAuth.is2FAEnabled !== 'function') {
+    showToast('Modul 2FA belum siap', 'warning');
+    return;
+  }
+  if (window.erpAuth.is2FAEnabled()) {
+    showTwoFactorManage();
+  } else {
+    showTwoFactorEnroll();
+  }
+}
+
 // Backup Management
 function showBackupManager() {
   const status = window.erpBackup.getBackupStatus();
@@ -718,6 +871,11 @@ ERP.registerAction('installPwaApp', function () {
 
 ERP.registerAction('changePassword', function () {
   showChangePassword();
+  return true;
+});
+
+ERP.registerAction('manage2FA', function () {
+  showTwoFactor();
   return true;
 });
 

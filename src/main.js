@@ -10,6 +10,12 @@ import {
   isEmailVerified,
   resendVerification,
   reloadVerification,
+  is2FAEnabled,
+  get2FAStatus,
+  begin2FAEnrollment,
+  enable2FA,
+  disable2FA,
+  regenerateBackupCodes,
 } from './core/auth.js';
 import { showToast } from './core/modal.js';
 import {
@@ -22,7 +28,17 @@ import {
   forceBackup,
 } from './core/backup.js';
 import { loadDB } from './core/db.js';
-import { resolveUserRole, listUsers, setUserRole, ROLES, ROLE_LABELS } from './core/user-role.js';
+import {
+  resolveUserRole,
+  listUsers,
+  setUserRole,
+  createUser,
+  resetUserPassword,
+  removeUser,
+  ROLES,
+  ROLE_LABELS,
+} from './core/user-role.js';
+import { getLoginLog, clearLoginLog } from './core/local-users.js';
 import { initMobileEnhancements, triggerHaptic, getDeviceType } from './mobile-enhancements.js';
 
 // Import new v3.0 features
@@ -45,6 +61,12 @@ if (typeof window !== 'undefined') {
 
 // Notification scheduler
 import { initNotifications } from './core/notifications.js';
+
+// i18n (Indonesian ⇄ English) — a DOM-sweep translator. Started before the
+// classic bundle renders so the MutationObserver catches every view. Exposes
+// window.I18N for the nav language toggle.
+import { initI18n } from './core/i18n.js';
+initI18n();
 
 // PWA: service worker (offline cache) + install-prompt capture (window.erpPwa,
 // consumed by the "Install Aplikasi" card in Pengaturan). Importing the module
@@ -70,6 +92,13 @@ window.erpAuth = {
   isEmailVerified,
   resendVerification,
   reloadVerification,
+  // Two-factor (TOTP) — consumed by the settings 2FA UI.
+  is2FAEnabled,
+  get2FAStatus,
+  begin2FAEnrollment,
+  enable2FA,
+  disable2FA,
+  regenerateBackupCodes,
 };
 window.erpBackup = {
   exportToFile,
@@ -84,7 +113,17 @@ window.erpMobile = { triggerHaptic, getDeviceType };
 // User management (admin-only at the rules layer). Exposed so the classic
 // settings module can render the User Management screen. window.__ERP_USER is
 // populated during startApp() once the role has been resolved.
-window.erpUsers = { list: listUsers, setRole: setUserRole, roles: ROLES, roleLabels: ROLE_LABELS };
+window.erpUsers = {
+  list: listUsers,
+  setRole: setUserRole,
+  create: createUser,
+  resetPassword: resetUserPassword,
+  remove: removeUser,
+  roles: ROLES,
+  roleLabels: ROLE_LABELS,
+  loginLog: getLoginLog,
+  clearLoginLog,
+};
 
 // Make v3.0 features globally available
 window.erpV3 = {

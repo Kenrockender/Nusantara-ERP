@@ -534,6 +534,34 @@ function excelBtn(view) {
   </button>`;
 }
 
+// ── Import Excel button helper ────────────────────────────────────────────────
+// Per-module import (Sales / Purchase / Logistics). Wired to importModuleExcel()
+// in excel-import.js, which dedups re-uploads by date and rejects duplicate DO
+// numbers.
+function importBtn(view) {
+  return `<button class="btn-ghost" data-action="importXLSX" data-type="${view}"
+    style="display:flex;align-items:center;gap:5px;font-size:12px">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg> Import Excel
+  </button>`;
+}
+
+// ── PDF summary button helper ─────────────────────────────────────────────────
+// Sales / Purchase only. Wired to printOrderSummary() in order-summary.js, which
+// opens a period picker then prints a per-item + per-document recap as PDF.
+function summaryBtn(view) {
+  return `<button class="btn-ghost" data-action="printSummary" data-type="${view}"
+    style="display:flex;align-items:center;gap:5px;font-size:12px">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+      <rect x="6" y="14" width="12" height="8"/>
+    </svg> Ringkasan PDF
+  </button>`;
+}
+
 // ── Empty state helper ────────────────────────────────────────────────────────
 // FIX (empty states): when a filter is active and returns no rows the message
 // names the filter and offers a one-click dismiss link.
@@ -710,6 +738,8 @@ function renderPurchase() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:14px;font-weight:700">Daftar Purchase Order</div>
       <div style="display:flex;align-items:center;gap:8px">
+        ${summaryBtn('purchase')}
+        ${importBtn('purchase')}
         ${exportBtn('purchase')}
         ${excelBtn('purchase')}
         ${filterBtn('purchase')}
@@ -909,7 +939,6 @@ function renderFinance() {
         `Status PKP: ${taxCfg.pkp ? 'Terdaftar (PKP)' : 'Non-PKP'}`,
         `NPWP: ${taxCfg.npwp || 'Belum diisi'}`,
         `Tarif PPN: ${Math.round((taxCfg.ppnRate || 0) * 100)}%`,
-        'SPT PPN/PPNBM: lihat menu Laporan › SPT PPN / PPNBM',
       ],
     },
     {
@@ -1359,30 +1388,7 @@ function renderReports() {
       )
       .join('')}
   </div>
-  <div class="fin-2col" style="margin-top:16px">
-    <div class="card">
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px">SPT PPN / PPNBM</div>
-      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">
-        Rekap SPT diambil dari total PPN keluaran dan masukan yang tercatat.
-      </div>
-      <div style="font-size:12px;display:flex;flex-direction:column;gap:6px">
-        <div>PPN Keluaran: <strong>${idrFull(taxSummary.outputTax)}</strong></div>
-        <div>PPN Masukan: <strong>${idrFull(taxSummary.inputTax)}</strong></div>
-        <div>PPN Terutang: <strong>${idrFull(taxSummary.netTax)}</strong></div>
-      </div>
-    </div>
-    <div class="card">
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px">AI Analysis</div>
-      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">
-        Ringkasan otomatis berdasarkan transaksi dan inventori terbaru.
-      </div>
-      <div style="font-size:12px;display:flex;flex-direction:column;gap:6px">
-        <div>Pelanggan terbesar: <strong>${escapeHtml(topCustomer.bestName)}</strong></div>
-        <div>Supplier terbesar: <strong>${escapeHtml(topSupplier.bestName)}</strong></div>
-        <div>Item stok rendah: <strong>${lowStock} item</strong></div>
-      </div>
-    </div>
-  </div>`;
+  `;
 }
 
 // ── View: Logistics ───────────────────────────────────────────────────────────
@@ -1472,6 +1478,7 @@ function renderLogistics() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:14px;font-weight:700">Daftar Delivery Order</div>
       <div style="display:flex;align-items:center;gap:8px">
+        ${importBtn('logistics')}
         ${exportBtn('logistics')}
         ${excelBtn('logistics')}
         ${filterBtn('logistics')}
@@ -1498,7 +1505,10 @@ function renderLogistics() {
               : paged
                   .map(d => {
                     const rawRef = d.soId || d.poId || null;
-                    const ref = rawRef ? docNum(null, rawRef) : '—';
+                    // Prefix the reference with its source type so it's obvious
+                    // at a glance whether the DO came from an SO or a PO.
+                    const refKind = d.soId ? 'SO' : d.poId ? 'PO' : '';
+                    const ref = rawRef ? `${refKind} · ${docNum(null, rawRef)}` : '—';
                     const refColor = d.soId
                       ? 'var(--primary)'
                       : d.poId
@@ -1508,7 +1518,11 @@ function renderLogistics() {
               <td class="td-p" style="font-size:11px;font-weight:700;color:var(--primary)">${escapeHtml(docNum(d.number, d.id))}</td>
               <td class="td-p" style="font-size:10px;font-weight:600;color:${refColor}">${escapeHtml(ref)}</td>
               <td class="td-p" style="font-size:12px;font-weight:600">${escapeHtml(d.customer)}</td>
-              <td class="td-p" style="font-size:12px;color:var(--muted)">${escapeHtml(d.destination)}</td>
+              <td class="td-p" style="font-size:12px;color:var(--muted)">${escapeHtml(d.destination)}${
+                d.destChanged
+                  ? ` <span title="${escapeHtml(d.destOriginal ? 'Tujuan diubah dari: ' + d.destOriginal : 'Tujuan diubah')}" style="display:inline-block;font-size:9px;font-weight:800;color:#B45309;background:#FEF3C7;border:1px solid #FCD34D;border-radius:99px;padding:1px 6px;vertical-align:middle">⚠ TUJUAN DIUBAH</span>`
+                  : ''
+              }</td>
               <td class="td-p" style="font-size:11px;color:var(--muted)">${escapeHtml(d.date)}</td>
               <td class="td-p" style="font-size:12px">${escapeHtml(d.driver)}</td>
               <td class="td-p" style="font-size:11px;font-family:monospace">${escapeHtml(d.vehicle)}</td>
@@ -2270,6 +2284,16 @@ document.addEventListener('click', async e => {
     case 'exportXLSX':
       exportXLSX(type);
       break;
+    case 'importXLSX':
+      if (typeof window.importModuleExcel === 'function') {
+        window.importModuleExcel(type);
+      }
+      break;
+    case 'printSummary':
+      if (typeof window.printOrderSummary === 'function') {
+        window.printOrderSummary(type);
+      }
+      break;
 
     // ── Notifications ─────────────────────────────────────────────────────────
     case 'markAllRead':
@@ -2990,6 +3014,8 @@ function renderSales() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:14px;font-weight:700">Daftar Sales Order</div>
       <div style="display:flex;align-items:center;gap:8px">
+        ${summaryBtn('sales')}
+        ${importBtn('sales')}
         ${exportBtn('sales')}
         ${filterBtn('sales')}
       </div>

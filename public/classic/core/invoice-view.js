@@ -177,7 +177,7 @@
     return '';
   }
 
-  function openNewModal(type) {
+  function openNewModal(type, preselectId) {
     if (!window.openModal) {
       return;
     }
@@ -263,6 +263,34 @@
           amountInp.value = opt.dataset.amount;
         }
       });
+
+      // Preselect a source document (used by "Buat Faktur" on SO/PO detail).
+      // The default dropdown filters by status (Delivered/Received); when the
+      // caller passes a source that isn't in that filtered list, inject it so
+      // the button works regardless of the order's current status.
+      if (preselectId && srcSel) {
+        let opt = Array.from(srcSel.options).find(o => o.value === preselectId);
+        if (!opt) {
+          const srcColl = type === 'SI' ? 'salesOrders' : 'purchaseOrders';
+          const src = (db()[srcColl] || []).find(d => d.id === preselectId);
+          if (src) {
+            const partyName = src.customer || src.supplier || '';
+            opt = document.createElement('option');
+            opt.value = src.id;
+            opt.dataset.party = partyName;
+            opt.dataset.partyid = src.customerId || src.supplierId || '';
+            opt.dataset.amount = src.amount || 0;
+            opt.textContent = `${esc(src.id)} · ${esc(partyName)} · ${money(src.amount || 0)}`;
+            srcSel.appendChild(opt);
+          }
+        }
+        if (opt) {
+          srcSel.value = preselectId;
+          srcSel.dispatchEvent(new Event('change'));
+        } else {
+          window.showToast?.('Dokumen sumber tidak ditemukan', 'warning');
+        }
+      }
 
       document.getElementById('inv-save')?.addEventListener('click', () => {
         if (!_srcId) {
@@ -417,8 +445,23 @@
         ${doc.note ? detailRow('Catatan', esc(doc.note)) : ''}
       </div>
       ${linesHtml}`,
-      `${window.DocFlow ? window.DocFlow.button(type, id) : ''}<button class="btn-ghost" data-action="closeModal">Tutup</button>`
+      `${type === 'SI' || type === 'PI' ? `<button class="btn-ghost" data-action="invPrint" data-id="${esc(id)}" data-type="${type}">Cetak PDF</button>` : ''}${window.DocFlow ? window.DocFlow.button(type, id) : ''}<button class="btn-ghost" data-action="closeModal">Tutup</button>`
     );
+  }
+
+  // Cetak faktur → window.printDocument (already wired with company info in
+  // settings.js). Opens a print window from which the browser can "Save as PDF".
+  function printDoc(type, id) {
+    const coll = collectionFor(type);
+    const doc = (db()[coll] || []).find(d => d.id === id);
+    if (!doc) {
+      return;
+    }
+    if (typeof window.printDocument === 'function') {
+      window.printDocument(type, doc);
+    } else {
+      window.showToast?.('Fungsi cetak belum siap', 'warning');
+    }
   }
 
   // ── Wire up ─────────────────────────────────────────────────────────────────
@@ -435,6 +478,13 @@
     openPurchaseInvoice: function () { _navToTab('PI'); },
     openSalesReceipt:    function () { _navToTab('SR'); },
     openPurchasePayment: function () { _navToTab('PP'); },
+    // Open the new-invoice modal with a source SO/PO already selected. Used by
+    // the "Buat Faktur" buttons on the SO/PO detail views (SI from SO, PI from PO).
+    createFromSource: function (type, srcId) {
+      if (type !== 'SI' && type !== 'PI') { return; }
+      activeTab = type;
+      openNewModal(type, srcId);
+    },
   };
 
   if (window.ERP && typeof window.ERP.registerAction === 'function') {
@@ -458,6 +508,12 @@
     window.ERP.registerAction('invPost', function (id, type) {
       if (id && type) {
         postDoc(type, id);
+      }
+      return true;
+    });
+    window.ERP.registerAction('invPrint', function (id, type) {
+      if (id && type) {
+        printDoc(type, id);
       }
       return true;
     });
