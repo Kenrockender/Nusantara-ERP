@@ -20,20 +20,35 @@ service firebase.storage {
     function isUnder10MB() {
       return request.resource.size < 10 * 1024 * 1024;
     }
-    
-    // User uploads (images, documents)
+
+    // Config-writer roles (admin/manajer) carry a role claim on the custom token.
+    // A null claim means an email/password bootstrap-admin session (no claim is
+    // minted for that path) — allowed so the owner is never locked out. Everyone
+    // else (viewer/penjualan/akunting/pending) is denied config writes.
+    function canWriteConfig() {
+      return isAuthenticated() &&
+             (request.auth.token.role == null ||
+              request.auth.token.role in ['admin', 'manajer']);
+    }
+
+    // User uploads (images, documents). Reads are open to any authenticated staff
+    // member on purpose: uploads are shared business attachments (invoice scans,
+    // delivery photos) that every operator may need to view. Writes stay scoped
+    // to the uploading user's own folder.
     match /uploads/{userId}/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
+      allow write: if isAuthenticated() &&
                      request.auth.uid == userId &&
                      (isValidImageType() || isValidDocumentType()) &&
                      isUnder10MB();
     }
-    
-    // Company assets (logos, etc.)
+
+    // Company assets (logos, etc.) — shared branding. Anyone signed in may read,
+    // but only config-writer roles may overwrite them (previously ANY signed-in
+    // user, including viewer/pending, could replace the company logo).
     match /company/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
+      allow write: if canWriteConfig() &&
                      isValidImageType() &&
                      isUnder10MB();
     }

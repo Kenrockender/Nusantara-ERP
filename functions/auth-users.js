@@ -117,20 +117,40 @@ async function writeUser(username, data) {
   await db().collection(COLLECTION).doc(key).set(data, { merge: true });
 }
 
+/** A high-entropy, human-typable seed password (no ambiguous chars). */
+function randomSeedPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = randomBytes(16);
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    out += alphabet[bytes[i] % alphabet.length];
+  }
+  return out;
+}
+
 /**
  * Seed the default accounts once, if the collection is empty. Idempotent: a
  * second caller that finds users present is a no-op. Returns the number seeded.
+ *
+ * SECURITY: seeded passwords are NOT the guessable "<username>123" — that made
+ * the public loginWithUsername callable a trivial admin backdoor on any fresh
+ * deploy. Each account gets either a shared operator-supplied SEED_ADMIN_PASSWORD
+ * (env) or a per-account random password that is written to the function logs
+ * exactly once (Cloud Logging is admin-only) so the owner can retrieve it. Every
+ * account is still flagged mustChangePassword.
  */
 export async function ensureSeedUsers() {
   const snap = await db().collection(COLLECTION).limit(1).get();
   if (!snap.empty) {
     return 0;
   }
+  const shared = process.env.SEED_ADMIN_PASSWORD || '';
+  const logged = [];
   let n = 0;
   for (const seed of SEED_USERS) {
     const salt = randomSalt();
-    const passwordHash = await hashPassword(`${seed.username}123`, salt);
-    // eslint-disable-next-line no-await-in-loop
+    const plain = shared || randomSeedPassword();
+    const passwordHash = await hashPassword(plain, salt);
     await writeUser(seed.username, {
       displayName: seed.displayName,
       role: 'admin',
@@ -141,7 +161,21 @@ export async function ensureSeedUsers() {
       mustChangePassword: true,
       createdAt: Date.now(),
     });
+    if (!shared) {
+      logged.push(`${seed.username} / ${plain}`);
+    }
     n++;
+  }
+  if (logged.length) {
+    // One-time disclosure to admin-only Cloud Logging. Change on first login.
+    console.warn(
+      '[authUsers] Seeded initial accounts with RANDOM passwords (change on first login):\n  ' +
+        logged.join('\n  ')
+    );
+  } else {
+    console.warn(
+      '[authUsers] Seeded initial accounts using SEED_ADMIN_PASSWORD env (change on first login).'
+    );
   }
   return n;
 }

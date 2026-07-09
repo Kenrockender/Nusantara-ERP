@@ -166,7 +166,14 @@ service cloud.firestore {
     // are not enough on their own. authUsers (password hashes + 2FA secrets) and
     // serverBackups (full-DB snapshots) must never be client-reachable.
     match /{collection}/{document=**} {
+      // Read requires an APPROVED identity, not merely a signed-in one: a user
+      // who has only self-provisioned the inactive `pending` doc (or was since
+      // deactivated) resolves to role()=='pending' and is denied. This keeps an
+      // unapproved account from reading the company's financials the instant it
+      // first authenticates. (Custom-token sessions carry a real role claim and
+      // pass; bootstrap admins pass; active doc users pass.)
       allow read: if signedIn()
+        && role() != 'pending'
         && collection != 'users'
         && collection != 'authUsers'
         && collection != 'serverBackups';

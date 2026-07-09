@@ -14,6 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { logger } from 'firebase-functions/v2';
 import { adminAuth } from './admin.js';
 import {
   ensureSeedUsers,
@@ -35,6 +36,60 @@ import { verifyTOTP } from './totp.js';
 
 const CALL_OPTS = { cors: true, maxInstances: 10 };
 
+// ── Brute-force throttle for password verification ───────────────────────────────
+// In-memory, per warm instance (same trade-off as handler.js): effective because
+// a warm instance is reused across calls, and it degrades to per-instance limits
+// under scale-out — still enough to blunt online password guessing. Keyed by
+// username+IP so one attacker can't lock out a whole account from many IPs, and a
+// shared IP can't be locked out by targeting many usernames.
+const LOGIN_MAX_ATTEMPTS = 8; // failures allowed per window before lockout
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15-minute sliding window
+const _loginAttempts = new Map(); // key → { count, windowStart }
+
+function throttleKey(request, username) {
+  const req = request.rawRequest || {};
+  const fwd = (req.headers && req.headers['x-forwarded-for']) || '';
+  const ip = fwd
+    ? String(fwd).split(',')[0].trim()
+    : (req.socket && req.socket.remoteAddress) || 'unknown';
+  return `${String(username || '').toLowerCase()}::${ip}`;
+}
+
+/** Throw resource-exhausted when the key is locked out; otherwise a no-op. */
+function assertNotLockedOut(key) {
+  const now = Date.now();
+  if (_loginAttempts.size > 10_000) {
+    for (const [k, b] of _loginAttempts) {
+      if (now - b.windowStart >= LOGIN_WINDOW_MS) {
+        _loginAttempts.delete(k);
+      }
+    }
+  }
+  const bucket = _loginAttempts.get(key);
+  if (bucket && now - bucket.windowStart < LOGIN_WINDOW_MS && bucket.count >= LOGIN_MAX_ATTEMPTS) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Terlalu banyak percobaan login. Coba lagi dalam beberapa menit.'
+    );
+  }
+}
+
+/** Record a failed attempt against the key (opens/extends its lockout window). */
+function recordFailedAttempt(key) {
+  const now = Date.now();
+  const bucket = _loginAttempts.get(key);
+  if (!bucket || now - bucket.windowStart >= LOGIN_WINDOW_MS) {
+    _loginAttempts.set(key, { count: 1, windowStart: now });
+  } else {
+    bucket.count += 1;
+  }
+}
+
+/** Clear the counter after a successful auth so a good login resets the window. */
+function clearFailedAttempts(key) {
+  _loginAttempts.delete(key);
+}
+
 function need(value, message) {
   if (value == null || value === '') {
     throw new HttpsError('invalid-argument', message);
@@ -47,6 +102,21 @@ function requireAdmin(request) {
   const role = request.auth && request.auth.token && request.auth.token.role;
   if (role !== 'admin') {
     throw new HttpsError('permission-denied', 'Hanya admin yang boleh melakukan ini.');
+  }
+}
+
+// Revoke every outstanding session for a username after a role/active/password
+// change (or deletion). Firestore rules read the role from the token claim and do
+// NOT re-check revocation, so the current ID token keeps its old claim until it
+// expires — but revoking bars the client from minting a fresh one, so the session
+// dies within the token TTL (≤1h) instead of lingering indefinitely. Without this
+// a downgraded/disabled account could refresh its old role indefinitely.
+// Best-effort: a revoke failure must not fail the admin operation itself.
+async function revokeSessions(username) {
+  try {
+    await adminAuth().revokeRefreshTokens(uidFor(username));
+  } catch (e) {
+    logger.warn('[auth] revokeRefreshTokens failed for', username, e && e.message);
   }
 }
 
@@ -72,17 +142,25 @@ async function mintToken(user) {
 
 /**
  * Verify username/password and return a Firebase custom token.
- * Auto-seeds the four default accounts the first time the store is empty, so a
- * fresh deploy has working logins (admin/admin123, …) exactly like local mode.
+ * Auto-seeds the four default accounts the first time the store is empty. Their
+ * passwords are NOT guessable defaults — they come from SEED_ADMIN_PASSWORD or a
+ * per-account random string logged once to Cloud Logging (see ensureSeedUsers).
+ * Rate-limited per username+IP to throttle online password guessing.
  */
 export const loginWithUsername = onCall(CALL_OPTS, async request => {
   const username = need(request.data && request.data.username, 'Username wajib diisi');
   const password = need(request.data && request.data.password, 'Password wajib diisi');
 
+  // Throttle before touching the store so lockout also applies to unknown users
+  // (otherwise "does this username exist" is itself a rate-unlimited oracle).
+  const tKey = throttleKey(request, username);
+  assertNotLockedOut(tKey);
+
   await ensureSeedUsers();
 
   const user = await verifyPassword(username, password);
   if (!user) {
+    recordFailedAttempt(tKey);
     // Same message for unknown user and wrong password — don't reveal which.
     throw new HttpsError('unauthenticated', 'Username atau password salah');
   }
@@ -98,10 +176,12 @@ export const loginWithUsername = onCall(CALL_OPTS, async request => {
     const okTotp = verifyTOTP(user.twoFactor.secret, totp);
     const okBackup = okTotp ? false : await verifyAndBurnBackupCode(user.username, totp);
     if (!okTotp && !okBackup) {
+      recordFailedAttempt(tKey);
       throw new HttpsError('unauthenticated', 'Kode 2FA salah atau sudah dipakai');
     }
   }
 
+  clearFailedAttempts(tKey);
   const token = await mintToken(user);
   return { token, mustChangePassword: !!user.mustChangePassword, role: user.role || 'viewer' };
 });
@@ -124,6 +204,8 @@ export const changeMyPassword = onCall(CALL_OPTS, async request => {
     throw new HttpsError('permission-denied', 'Password lama salah');
   }
   await guard(() => setPassword(username, newPassword));
+  // Note: the caller's own session is NOT revoked here — they just proved the old
+  // password and keep working. Admin-driven resets (adminSetPassword) DO revoke.
   return { ok: true };
 });
 
@@ -217,29 +299,39 @@ export const adminCreateUser = onCall(CALL_OPTS, async request => {
 export const adminSetPassword = onCall(CALL_OPTS, async request => {
   requireAdmin(request);
   const d = request.data || {};
-  await guard(() =>
-    setPassword(need(d.username, 'Username wajib diisi'), need(d.password, 'Password wajib diisi'))
-  );
+  const username = need(d.username, 'Username wajib diisi');
+  await guard(() => setPassword(username, need(d.password, 'Password wajib diisi')));
+  await revokeSessions(username); // force re-login with the new password
   return { ok: true };
 });
 
 export const adminSetRole = onCall(CALL_OPTS, async request => {
   requireAdmin(request);
   const d = request.data || {};
-  await guard(() => setRole(need(d.username, 'Username wajib diisi'), need(d.role, 'Role wajib diisi')));
+  const username = need(d.username, 'Username wajib diisi');
+  await guard(() => setRole(username, need(d.role, 'Role wajib diisi')));
+  await revokeSessions(username); // stale role claim must not outlive the change
   return { ok: true };
 });
 
 export const adminSetActive = onCall(CALL_OPTS, async request => {
   requireAdmin(request);
   const d = request.data || {};
-  await guard(() => setActive(need(d.username, 'Username wajib diisi'), !!d.active));
+  const username = need(d.username, 'Username wajib diisi');
+  await guard(() => setActive(username, !!d.active));
+  // Deactivating cuts off existing sessions within the token TTL (the claim alone
+  // would otherwise keep them working, and refreshing indefinitely).
+  if (!d.active) {
+    await revokeSessions(username);
+  }
   return { ok: true };
 });
 
 export const adminDeleteUser = onCall(CALL_OPTS, async request => {
   requireAdmin(request);
   const d = request.data || {};
-  await guard(() => deleteUser(need(d.username, 'Username wajib diisi')));
+  const username = need(d.username, 'Username wajib diisi');
+  await guard(() => deleteUser(username));
+  await revokeSessions(username);
   return { ok: true };
 });
