@@ -130,6 +130,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── serverBackups: server-only nightly snapshots ──────────────────────────
+    // Written by the nightlyBackup scheduled function (functions/backup.js) via
+    // the Admin SDK. These are FULL-database snapshots — no client may read or
+    // write. The catch-all below also excludes serverBackups from client access:
+    // Firestore OR-combines allow rules across overlapping match blocks, so this
+    // sibling `if false` alone would be overridden by the catch-all's signedIn()
+    // read. Both guards are required.
+    match /serverBackups/{document=**} {
+      allow read, write: if false;
+    }
+
     // ── glSeed: read-only GL seed (Accurate journals + chart of accounts) ─────
     // Replaces the old PUBLIC public/accurate-data.json, whose flat file exposed
     // the company's full financials (5,501 journal vouchers) to anyone — Firebase
@@ -150,10 +161,23 @@ service cloud.firestore {
     // covered — a plain /{collection}/{docId} would DENY them. The module is
     // keyed off the top-level collection name. (users is handled above and
     // excluded from reads here to keep it private.)
+    // Server-only collections are excluded from every catch-all grant because
+    // Firestore OR-combines allow rules — their sibling `if false` blocks above
+    // are not enough on their own. authUsers (password hashes + 2FA secrets) and
+    // serverBackups (full-DB snapshots) must never be client-reachable.
     match /{collection}/{document=**} {
-      allow read: if signedIn() && collection != 'users';
-      allow create, update: if verified() && canWriteModule(moduleOf(collection));
-      allow delete: if verified() && canDeleteModule(moduleOf(collection));
+      allow read: if signedIn()
+        && collection != 'users'
+        && collection != 'authUsers'
+        && collection != 'serverBackups';
+      allow create, update: if verified()
+        && canWriteModule(moduleOf(collection))
+        && collection != 'authUsers'
+        && collection != 'serverBackups';
+      allow delete: if verified()
+        && canDeleteModule(moduleOf(collection))
+        && collection != 'authUsers'
+        && collection != 'serverBackups';
     }
   }
 }

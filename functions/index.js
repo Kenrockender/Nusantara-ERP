@@ -13,6 +13,9 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { handleApi } from './handler.js';
 import { getCollection } from './firestore.js';
 
+// Nightly Firestore backup (Cloud Scheduler → serverBackups). See backup.js.
+export { nightlyBackup } from './backup.js';
+
 // Username → Firebase custom-token auth callables (see auth.js).
 export {
   loginWithUsername,
