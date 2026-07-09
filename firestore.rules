@@ -37,7 +37,9 @@ service cloud.firestore {
       return signedIn();
     }
     function bootstrapAdmin() {
-      return verified() && request.auth.token.email in ['kenrockender521@gmail.com'];
+      return verified()
+        && request.auth.token.email != null
+        && request.auth.token.email in ['kenrockender521@gmail.com'];
     }
     function userPath() {
       return /databases/$(database)/documents/users/$(request.auth.uid);
@@ -51,11 +53,18 @@ service cloud.firestore {
     function isActive() {
       return bootstrapAdmin() || (hasUserDoc() && userDoc().active == true);
     }
-    // The effective role: bootstrap admins are always admin; an active user gets
-    // their assigned role; everyone else is 'pending' (no writes).
+    // Role carried as a custom claim on the Firebase custom token minted by the
+    // loginWithUsername Cloud Function (username → token auth). Present only for
+    // those sessions; null for email/password or unauthenticated sessions.
+    function claimRole() {
+      return signedIn() && request.auth.token.role != null ? request.auth.token.role : null;
+    }
+    // The effective role: bootstrap admins are always admin; a custom-token role
+    // claim wins next (server already checked the account is active before
+    // minting); otherwise fall back to the users/{uid} doc; else 'pending'.
     function role() {
-      return bootstrapAdmin()
-        ? 'admin'
+      return claimRole() != null ? claimRole()
+        : bootstrapAdmin() ? 'admin'
         : (isActive() ? userDoc().role : 'pending');
     }
     function isAdmin() {
@@ -110,6 +119,15 @@ service cloud.firestore {
                     || (verified() && uid == request.auth.uid
                         && request.resource.data.role == 'pending');
       allow update, delete: if isAdmin();
+    }
+
+    // ── authUsers: server-only credential store ───────────────────────────────
+    // Username/password hashes + 2FA config for the loginWithUsername Cloud
+    // Function. NO client may read or write this — only the Admin SDK (which
+    // bypasses rules) inside the auth functions touches it, so password hashes
+    // never leave the server.
+    match /authUsers/{u} {
+      allow read, write: if false;
     }
 
     // ── glSeed: read-only GL seed (Accurate journals + chart of accounts) ─────

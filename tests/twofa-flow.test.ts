@@ -47,7 +47,7 @@ describe('2FA login flow (local users)', () => {
     const { backupCodes } = await enable2FA(secret, enrollCode);
     expect(backupCodes).toHaveLength(8);
     expect(is2FAEnabled()).toBe(true);
-    expect(get2FAStatus()).toMatchObject({ enabled: true, backupCodesRemaining: 8 });
+    expect(await get2FAStatus()).toMatchObject({ enabled: true, backupCodesRemaining: 8 });
 
     // 3. Re-login now stops at the password step and asks for the second factor.
     logout();
@@ -77,7 +77,7 @@ describe('2FA login flow (local users)', () => {
     // A backup code works…
     const ok = await completeSecondFactor(backupCodes[0]);
     expect(ok.ok).toBe(true);
-    expect(get2FAStatus().backupCodesRemaining).toBe(7);
+    expect((await get2FAStatus()).backupCodesRemaining).toBe(7);
 
     // …but the same backup code cannot be reused.
     logout();
@@ -94,7 +94,7 @@ describe('2FA login flow (local users)', () => {
     const { backupCodes: fresh } = await regenerateBackupCodes();
     expect(fresh).toHaveLength(8);
     expect(fresh[0]).not.toBe(original[0]);
-    expect(get2FAStatus().backupCodesRemaining).toBe(8);
+    expect((await get2FAStatus()).backupCodesRemaining).toBe(8);
 
     await disable2FA('admin123'); // password confirms
     expect(is2FAEnabled()).toBe(false);

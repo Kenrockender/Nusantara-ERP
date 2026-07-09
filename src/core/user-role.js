@@ -22,16 +22,14 @@
 // server enforcement only applies in Firebase mode.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  collection,
-  getDocs,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db as fbDb, isFirebaseConfigured } from '../config/firebase.js';
+  db as fbDb,
+  auth as fbAuth,
+  functions as fbFunctions,
+  isFirebaseConfigured,
+} from '../config/firebase.js';
 import { getCurrentUser, getAuthMode } from './auth.js';
 import {
   listLocalUsers,
@@ -60,10 +58,6 @@ export const ROLE_LABELS = {
 
 function isBootstrap(email) {
   return !!email && BOOTSTRAP_ADMINS.includes(String(email).toLowerCase());
-}
-
-function usersCol() {
-  return collection(fbDb, 'users');
 }
 
 function userRef(uid) {
@@ -101,6 +95,30 @@ export async function resolveUserRole() {
   }
 
   const bootstrap = isBootstrap(email);
+
+  // Username → custom-token session: the role is a claim on the Firebase ID
+  // token (set by the loginWithUsername Cloud Function) — authoritative and
+  // identical to what the Firestore rules enforce. These users have no
+  // users/{uid} document, so trust the claim directly and skip the doc lookup.
+  try {
+    if (fbAuth && fbAuth.currentUser) {
+      const tok = await fbAuth.currentUser.getIdTokenResult();
+      const claimRole = tok && tok.claims && tok.claims.role;
+      if (claimRole) {
+        return {
+          uid: user.uid,
+          email,
+          displayName,
+          role: bootstrap ? 'admin' : claimRole,
+          active: true,
+          mode: 'firebase',
+          source: 'claim',
+        };
+      }
+    }
+  } catch (_) {
+    /* fall through to the users/{uid} document path */
+  }
 
   try {
     const ref = userRef(user.uid);
@@ -160,7 +178,24 @@ function isLocalMode() {
   return getAuthMode() !== 'firebase' || !isFirebaseConfigured || !fbDb;
 }
 
-/** List every known user. In local mode reads the local user store. */
+// Invoke an admin auth callable (adminListUsers, adminCreateUser, …). Unwraps
+// the Cloud Function's HttpsError into a plain Error with its (Indonesian)
+// message so the User Management UI can show it verbatim.
+async function callAdmin(name, data) {
+  try {
+    const res = await httpsCallable(fbFunctions, name)(data || {});
+    return res.data;
+  } catch (e) {
+    throw new Error((e && e.message) || 'Operasi gagal');
+  }
+}
+
+/**
+ * List every known user. Cloud mode reads the server-only authUsers store via
+ * the admin callable; local mode reads the browser store. Both key `uid` by
+ * username so the rest of the UI (which passes uid back to the mutators) works
+ * uniformly.
+ */
 export async function listUsers() {
   if (isLocalMode()) {
     return listLocalUsers().map(u => ({
@@ -174,11 +209,20 @@ export async function listUsers() {
       local: true,
     }));
   }
-  const snap = await getDocs(usersCol());
-  return snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+  const { users } = await callAdmin('adminListUsers');
+  return (users || []).map(u => ({
+    uid: u.username,
+    username: u.username,
+    email: u.username,
+    displayName: u.displayName,
+    role: u.role,
+    active: u.active,
+    mustChangePassword: u.mustChangePassword,
+    twoFactorEnabled: u.twoFactorEnabled,
+  }));
 }
 
-/** Set a user's role and active flag. Admin-only. */
+/** Set a user's role and active flag. Admin-only. (uid == username.) */
 export async function setUserRole(uid, role, active = true) {
   if (!uid) {
     throw new Error('uid wajib diisi');
@@ -191,30 +235,34 @@ export async function setUserRole(uid, role, active = true) {
     setUserActive(uid, !!active);
     return true;
   }
-  await setDoc(userRef(uid), { role, active: !!active }, { merge: true });
+  await callAdmin('adminSetRole', { username: uid, role });
+  await callAdmin('adminSetActive', { username: uid, active: !!active });
   return true;
 }
 
-/** Create a new user (local mode only). */
-export async function createUser(username, displayName, password, role = 'admin') {
-  if (!isLocalMode()) {
-    throw new Error('Buat user via Firebase Console untuk mode cloud.');
+/** Create a new user. */
+export async function createUser(username, displayName, password, role = 'viewer') {
+  if (isLocalMode()) {
+    return addLocalUser(username, displayName, password, role);
   }
-  return addLocalUser(username, displayName, password, role);
+  await callAdmin('adminCreateUser', { username, displayName, password, role });
+  return true;
 }
 
-/** Reset a user's password (local mode only). */
+/** Reset a user's password. */
 export async function resetUserPassword(username, newPassword) {
-  if (!isLocalMode()) {
-    throw new Error('Reset password via Firebase Console untuk mode cloud.');
+  if (isLocalMode()) {
+    return setLocalUserPassword(username, newPassword);
   }
-  return setLocalUserPassword(username, newPassword);
+  await callAdmin('adminSetPassword', { username, password: newPassword });
+  return true;
 }
 
-/** Remove a user (local mode only). */
+/** Remove a user. */
 export async function removeUser(username) {
-  if (!isLocalMode()) {
-    throw new Error('Hapus user via Firebase Console untuk mode cloud.');
+  if (isLocalMode()) {
+    return deleteLocalUser(username);
   }
-  return deleteLocalUser(username);
+  await callAdmin('adminDeleteUser', { username });
+  return true;
 }

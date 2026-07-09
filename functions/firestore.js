@@ -7,22 +7,7 @@
 // VITE_FIREBASE_DB_ID fallback); override with the FIRESTORE_DATABASE_ID env var.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-
-let _db = null;
-
-function db() {
-  if (_db) {
-    return _db;
-  }
-  if (!getApps().length) {
-    initializeApp();
-  }
-  const dbId = process.env.FIRESTORE_DATABASE_ID || '(default)';
-  _db = getFirestore(dbId);
-  return _db;
-}
+import { adminDb as db } from './admin.js';
 
 /** Read up to `limit` documents from `collectionName`, id-stamped. */
 export async function getCollection(collectionName, { limit = 100 } = {}) {

@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getAnalytics } from 'firebase/analytics';
 
 // Firebase configuration from environment variables
@@ -34,7 +35,12 @@ let app = null;
 let auth = null;
 let db = null;
 let storage = null;
+let functions = null;
 let analytics = null;
+
+// Cloud Functions region — must match the deploy region of the auth callables
+// (loginWithUsername, …) in functions/. They deploy to the default us-central1.
+const FUNCTIONS_REGION = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
 
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
@@ -44,6 +50,7 @@ if (isFirebaseConfigured) {
   // Blaze/billing — override via VITE_FIREBASE_DB_ID only if you use one.
   db = getFirestore(app, import.meta.env.VITE_FIREBASE_DB_ID || '(default)');
   storage = getStorage(app);
+  functions = getFunctions(app, FUNCTIONS_REGION);
   if (typeof window !== 'undefined' && import.meta.env.PROD) {
     analytics = getAnalytics(app);
   }
@@ -54,7 +61,8 @@ if (isFirebaseConfigured && import.meta.env.DEV && import.meta.env.VITE_USE_EMUL
   connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, 'localhost', 8080);
   connectStorageEmulator(storage, 'localhost', 9199);
+  connectFunctionsEmulator(functions, 'localhost', 5001);
   console.log('🔧 Connected to Firebase Emulators');
 }
 
-export { app, auth, db, storage, analytics };
+export { app, auth, db, storage, functions, analytics };

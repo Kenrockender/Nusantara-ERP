@@ -10,6 +10,7 @@
 
 import {
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   sendEmailVerification,
   signOut,
   onAuthStateChanged,
@@ -17,7 +18,8 @@ import {
   reauthenticateWithCredential,
   EmailAuthProvider,
 } from 'firebase/auth';
-import { auth as fbAuth, isFirebaseConfigured } from '../config/firebase.js';
+import { httpsCallable } from 'firebase/functions';
+import { auth as fbAuth, functions as fbFunctions, isFirebaseConfigured } from '../config/firebase.js';
 import {
   ensureUsers,
   verifyUser,
@@ -207,8 +209,16 @@ export async function initAuth() {
   const s = getSession();
   if (isSessionValid(s)) {
     currentUser = userFromSession(s);
-    _activeMode = 'local';
     startSessionTimer();
+    // Restore the persisted Firebase custom-token session (if any) BEFORE the app
+    // loads data, so loadDB() reads Firestore with request.auth set (online)
+    // instead of racing an unauthenticated read into the local fallback.
+    if (_useFirebase) {
+      const fbUser = await firstAuthState();
+      _activeMode = fbUser ? 'firebase' : 'local';
+    } else {
+      _activeMode = 'local';
+    }
     return true;
   }
   clearSession();
@@ -225,7 +235,85 @@ export async function initAuth() {
  * account with write access. Firebase accounts must be created from the
  * Firebase Console / Admin SDK.
  */
+// Cloud Functions error codes that mean "the server rejected these credentials"
+// (or the account can't log in via cloud) — surface the message, do NOT fall
+// back to local auth (which could accept a stale local password).
+const _AUTH_DENY_CODES = new Set([
+  'functions/unauthenticated', // wrong username/password
+  'functions/permission-denied',
+  'functions/failed-precondition', // e.g. 2FA account (not yet supported in cloud)
+  'functions/invalid-argument',
+]);
+
+// Verify credentials on the server (Cloud Function). Returns either the token
+// payload { token, mustChangePassword, role } or { twoFactor: true } when the
+// account needs a second factor. Does NOT sign in — the caller decides, so the
+// 2FA challenge can be shown before a session is created. Throws the FirebaseError
+// on failure so callers can distinguish "rejected" from "unreachable".
+async function serverLogin(username, password, totp) {
+  const payload = { username, password };
+  if (totp) {
+    payload.totp = totp;
+  }
+  const { data } = await httpsCallable(fbFunctions, 'loginWithUsername')(payload);
+  return data;
+}
+
+// True when 2FA management should go through the server (Firebase session).
+function twoFactorOnServer() {
+  return _activeMode === 'firebase' && _useFirebase && !!fbFunctions;
+}
+
+// Invoke a 2FA callable, surfacing its (Indonesian) HttpsError message as a
+// plain Error so the settings UI can show it verbatim.
+async function call2FA(name, payload) {
+  try {
+    const { data } = await httpsCallable(fbFunctions, name)(payload || {});
+    return data;
+  } catch (e) {
+    throw new Error((e && e.message) || 'Operasi 2FA gagal');
+  }
+}
+
+// Create the app session for a server-authenticated user (Firebase custom token).
+function finishServerLogin(username, data) {
+  const u = {
+    username: String(username).trim().toLowerCase(),
+    displayName: String(username).trim(),
+    role: data.role || 'viewer',
+    mustChangePassword: !!data.mustChangePassword,
+  };
+  currentUser = userFromSession(u);
+  createSession(u);
+  _activeMode = 'firebase';
+  startSessionTimer();
+  recordLoginEvent(u.username, u.displayName, 'login', 'firebase');
+}
+
 export async function login(username, password) {
+  // Prefer server auth (Firebase custom token) so the session is online on every
+  // device. Fall back to the local store only when the server is unreachable.
+  if (_useFirebase && fbFunctions) {
+    try {
+      const data = await serverLogin(username, password);
+      if (data && data.twoFactor) {
+        // Password accepted; hold the credentials to complete step 2 server-side.
+        _pending2FA = { firebase: true, username, password };
+        return { ok: false, twoFactor: true, username };
+      }
+      await signInWithCustomToken(fbAuth, data.token);
+      finishServerLogin(username, data);
+      return { ok: true, mode: 'firebase' };
+    } catch (e) {
+      const code = e && e.code;
+      if (_AUTH_DENY_CODES.has(code)) {
+        return { ok: false, msg: (e && e.message) || 'Username atau password salah' };
+      }
+      // Offline / unavailable / internal → degrade to local auth so the app
+      // still works (mode 'local'); the badge will read "Lokal" until online.
+      console.warn('[Auth] Server login unavailable, falling back to local:', code || (e && e.message));
+    }
+  }
   return localLogin(username, password);
 }
 
@@ -289,6 +377,23 @@ async function verifySecondFactorValue(username, value) {
  * Returns { ok, msg }. On success the local session is created.
  */
 export async function completeSecondFactor(token) {
+  // Server (Firebase) path: re-call the login function with the 2FA code, which
+  // verifies it server-side and returns the token on success.
+  if (_pending2FA && _pending2FA.firebase) {
+    const { username, password } = _pending2FA;
+    try {
+      const data = await serverLogin(username, password, token);
+      if (!data || data.twoFactor || !data.token) {
+        return { ok: false, msg: 'Kode 2FA salah atau sudah dipakai' };
+      }
+      await signInWithCustomToken(fbAuth, data.token);
+      _pending2FA = null;
+      finishServerLogin(username, data);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, msg: (e && e.message) || 'Kode 2FA salah atau sudah dipakai' };
+    }
+  }
   if (!_pending2FA || !_pending2FA.user) {
     return { ok: false, msg: 'Tidak ada proses login yang menunggu verifikasi 2FA' };
   }
@@ -312,13 +417,34 @@ export function cancelSecondFactor() {
   _pending2FA = null;
 }
 
-/** True when the signed-in user has 2FA switched on. */
+/**
+ * True when the signed-in user has 2FA switched on. Synchronous — for the
+ * server (Firebase) session it reflects the cached login flag; the settings UI
+ * uses the async get2FAStatus() for the authoritative enroll/manage decision.
+ */
 export function is2FAEnabled() {
+  if (twoFactorOnServer()) {
+    return !!(currentUser && currentUser.twoFactorEnabled);
+  }
   return !!(currentUser && userHasTwoFactor(currentUser.username));
 }
 
-/** Status snapshot for the settings UI. */
-export function get2FAStatus() {
+/** Status snapshot for the settings UI. Async: cloud mode queries the server. */
+export async function get2FAStatus() {
+  if (twoFactorOnServer()) {
+    try {
+      const data = await call2FA('get2FAStatus', {});
+      if (currentUser) {
+        currentUser.twoFactorEnabled = !!data.enabled;
+      }
+      return {
+        enabled: !!data.enabled,
+        backupCodesRemaining: data.backupCodesRemaining || 0,
+      };
+    } catch (_) {
+      return { enabled: false, backupCodesRemaining: 0 };
+    }
+  }
   const tf = currentUser ? getUserTwoFactor(currentUser.username) : null;
   return {
     enabled: !!(tf && tf.enabled),
@@ -361,6 +487,11 @@ export async function enable2FA(secret, token) {
   if (!currentUser || !currentUser.username) {
     throw new Error('Tidak ada sesi aktif');
   }
+  if (twoFactorOnServer()) {
+    const data = await call2FA('enable2FA', { secret, token });
+    currentUser.twoFactorEnabled = true;
+    return { backupCodes: data.backupCodes };
+  }
   if (!(await verifyTOTP(secret, token))) {
     throw new Error('Kode salah — pastikan jam perangkat & authenticator sinkron.');
   }
@@ -378,6 +509,11 @@ export async function disable2FA(confirmValue) {
   if (!currentUser || !currentUser.username) {
     throw new Error('Tidak ada sesi aktif');
   }
+  if (twoFactorOnServer()) {
+    await call2FA('disable2FA', { confirm: confirmValue });
+    currentUser.twoFactorEnabled = false;
+    return true;
+  }
   const okPassword = !!(await verifyUser(currentUser.username, confirmValue || ''));
   const ok2fa = !okPassword && (await verifySecondFactorValue(currentUser.username, confirmValue));
   if (!okPassword && !ok2fa) {
@@ -391,6 +527,10 @@ export async function disable2FA(confirmValue) {
 export async function regenerateBackupCodes() {
   if (!currentUser || !currentUser.username) {
     throw new Error('Tidak ada sesi aktif');
+  }
+  if (twoFactorOnServer()) {
+    const data = await call2FA('regenerateBackupCodes', {});
+    return { backupCodes: data.backupCodes };
   }
   const tf = getUserTwoFactor(currentUser.username);
   if (!tf || !tf.enabled) {
@@ -669,12 +809,23 @@ export async function changePassword(currentPassword, newPassword) {
   if (!currentUser || !currentUser.username) {
     throw new Error('Tidak ada sesi aktif');
   }
-  // Verify the current password against the stored hash before changing it.
-  const ok = await verifyUser(currentUser.username, currentPassword || '');
-  if (!ok) {
-    throw new Error('Password lama salah');
+  if (_activeMode === 'firebase' && _useFirebase && fbFunctions) {
+    // Server-authenticated session: change the password server-side (re-verifies
+    // the old one there). The password hash never leaves the server.
+    const call = httpsCallable(fbFunctions, 'changeMyPassword');
+    try {
+      await call({ oldPassword: currentPassword, newPassword });
+    } catch (e) {
+      throw new Error((e && e.message) || 'Gagal mengganti password');
+    }
+  } else {
+    // Local (offline) session: verify + set against the browser store.
+    const ok = await verifyUser(currentUser.username, currentPassword || '');
+    if (!ok) {
+      throw new Error('Password lama salah');
+    }
+    await setUserPassword(currentUser.username, newPassword);
   }
-  await setUserPassword(currentUser.username, newPassword);
   currentUser.mustChangePassword = false;
   // Reflect the cleared flag in the persisted session too.
   const s = getSession();

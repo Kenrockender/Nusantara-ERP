@@ -13,6 +13,22 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { handleApi } from './handler.js';
 import { getCollection } from './firestore.js';
 
+// Username → Firebase custom-token auth callables (see auth.js).
+export {
+  loginWithUsername,
+  changeMyPassword,
+  enable2FA,
+  disable2FA,
+  regenerateBackupCodes,
+  get2FAStatus,
+  adminListUsers,
+  adminCreateUser,
+  adminSetPassword,
+  adminSetRole,
+  adminSetActive,
+  adminDeleteUser,
+} from './auth.js';
+
 export const api = onRequest(
   // Default region (us-central1) keeps the Hosting rewrite string form simple.
   { cors: true, maxInstances: 10 },

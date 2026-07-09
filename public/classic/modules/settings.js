@@ -455,8 +455,8 @@ function showTwoFactorEnroll() {
   }, 50);
 }
 
-function showTwoFactorManage() {
-  const status = window.erpAuth.get2FAStatus();
+function showTwoFactorManage(status) {
+  status = status || { backupCodesRemaining: 0 };
   openModal(
     'Verifikasi 2 Langkah',
     '<div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg);border-radius:10px;margin-bottom:14px">' +
@@ -500,13 +500,20 @@ function showTwoFactorManage() {
   }, 50);
 }
 
-function showTwoFactor() {
-  if (!window.erpAuth || typeof window.erpAuth.is2FAEnabled !== 'function') {
+async function showTwoFactor() {
+  if (!window.erpAuth || typeof window.erpAuth.get2FAStatus !== 'function') {
     showToast('Modul 2FA belum siap', 'warning');
     return;
   }
-  if (window.erpAuth.is2FAEnabled()) {
-    showTwoFactorManage();
+  // Authoritative enroll/manage decision — in cloud mode this queries the server.
+  let status;
+  try {
+    status = await window.erpAuth.get2FAStatus();
+  } catch (_) {
+    status = { enabled: false };
+  }
+  if (status.enabled) {
+    showTwoFactorManage(status);
   } else {
     showTwoFactorEnroll();
   }

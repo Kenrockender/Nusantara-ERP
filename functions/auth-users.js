@@ -1,0 +1,280 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// NUSANTARA ERP — Server-side user store (authUsers) for Cloud Functions auth.
+// -----------------------------------------------------------------------------
+// Credentials live in the `authUsers/{username}` Firestore collection, which the
+// security rules lock to server-only (allow read, write: if false). Only these
+// functions — running with the Admin SDK (which bypasses rules) — can touch it,
+// so password hashes never reach any client.
+//
+// Password hashing MUST stay byte-compatible with the browser fallback store
+// (src/core/local-users.js): PBKDF2 / SHA-256, 100k iterations, 256-bit output,
+// hex-encoded, with a per-user hex salt. That lets us migrate a browser-seeded
+// account server-side (and vice-versa) without invalidating passwords.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { randomBytes, pbkdf2 as _pbkdf2, createHash } from 'node:crypto';
+import { adminDb } from './admin.js';
+
+const PBKDF2_ITERATIONS = 100000;
+const KEY_LEN = 32; // 256 bits
+const DIGEST = 'sha256';
+const COLLECTION = 'authUsers';
+
+// First-run accounts, mirrored from src/core/local-users.js SEED_USERS. All
+// admins for now; default password "<username>123"; flagged mustChangePassword.
+const SEED_USERS = [
+  { username: 'admin', displayName: 'Administrator' },
+  { username: 'firna', displayName: 'Firna' },
+  { username: 'richard', displayName: 'Richard' },
+  { username: 'lisa', displayName: 'Lisa' },
+];
+
+const db = adminDb;
+
+// ── hashing ────────────────────────────────────────────────────────────────────
+export function randomSalt() {
+  return randomBytes(16).toString('hex');
+}
+
+export function hashPassword(password, saltHex) {
+  return new Promise((resolve, reject) => {
+    _pbkdf2(
+      Buffer.from(String(password), 'utf8'),
+      Buffer.from(saltHex, 'hex'),
+      PBKDF2_ITERATIONS,
+      KEY_LEN,
+      DIGEST,
+      (err, derived) => (err ? reject(err) : resolve(derived.toString('hex')))
+    );
+  });
+}
+
+// Constant-time hex-string compare to avoid leaking the hash via timing.
+export function safeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+// Salted SHA-256 for 2FA backup codes — mirrors local-users.hashBackupCode.
+export function hashBackupCode(code, saltHex) {
+  const normalized = saltHex + ':' + String(code).replace(/\s+/g, '').toUpperCase();
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+// ── username normalization (mirror of local-users.normUsername) ─────────────────
+export function normUsername(u) {
+  const s = String(u || '')
+    .trim()
+    .toLowerCase();
+  const at = s.indexOf('@');
+  return at > 0 ? s.slice(0, at) : s;
+}
+
+/** Stable Firebase Auth uid derived from the username. */
+export function uidFor(username) {
+  return 'u_' + normUsername(username);
+}
+
+// ── persistence ──────────────────────────────────────────────────────────────
+export async function getUser(username) {
+  const key = normUsername(username);
+  if (!key) {
+    return null;
+  }
+  const snap = await db().collection(COLLECTION).doc(key).get();
+  return snap.exists ? { username: key, ...snap.data() } : null;
+}
+
+export async function listUsers() {
+  const snap = await db().collection(COLLECTION).get();
+  return snap.docs.map(d => {
+    const u = d.data();
+    // Strip secrets before returning to any caller.
+    return {
+      username: d.id,
+      displayName: u.displayName || d.id,
+      role: u.role || 'viewer',
+      active: u.active !== false,
+      mustChangePassword: !!u.mustChangePassword,
+      twoFactorEnabled: !!(u.twoFactor && u.twoFactor.enabled),
+      createdAt: u.createdAt || null,
+    };
+  });
+}
+
+async function writeUser(username, data) {
+  const key = normUsername(username);
+  await db().collection(COLLECTION).doc(key).set(data, { merge: true });
+}
+
+/**
+ * Seed the default accounts once, if the collection is empty. Idempotent: a
+ * second caller that finds users present is a no-op. Returns the number seeded.
+ */
+export async function ensureSeedUsers() {
+  const snap = await db().collection(COLLECTION).limit(1).get();
+  if (!snap.empty) {
+    return 0;
+  }
+  let n = 0;
+  for (const seed of SEED_USERS) {
+    const salt = randomSalt();
+    const passwordHash = await hashPassword(`${seed.username}123`, salt);
+    // eslint-disable-next-line no-await-in-loop
+    await writeUser(seed.username, {
+      displayName: seed.displayName,
+      role: 'admin',
+      salt,
+      passwordHash,
+      active: true,
+      mustChangePassword: true,
+      createdAt: Date.now(),
+    });
+    n++;
+  }
+  return n;
+}
+
+/** Verify a username/password pair. Returns the stored user record or null. */
+export async function verifyPassword(username, password) {
+  const user = await getUser(username);
+  if (!user || user.active === false || !user.salt || !user.passwordHash) {
+    return null;
+  }
+  const hash = await hashPassword(password || '', user.salt);
+  return safeEqualHex(hash, user.passwordHash) ? user : null;
+}
+
+export async function createUser(username, displayName, password, role = 'viewer') {
+  const key = normUsername(username);
+  if (!key) {
+    throw new Error('Username wajib diisi');
+  }
+  if (!/^[a-z0-9._-]+$/.test(key)) {
+    throw new Error('Username hanya boleh huruf, angka, titik, garis, dan garis bawah');
+  }
+  if (!password || password.length < 6) {
+    throw new Error('Password minimal 6 karakter');
+  }
+  if (await getUser(key)) {
+    throw new Error('Username sudah dipakai');
+  }
+  const salt = randomSalt();
+  const passwordHash = await hashPassword(password, salt);
+  await writeUser(key, {
+    displayName: displayName || username,
+    role,
+    salt,
+    passwordHash,
+    active: true,
+    mustChangePassword: false,
+    createdAt: Date.now(),
+  });
+  return true;
+}
+
+export async function setPassword(username, newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('Password minimal 6 karakter');
+  }
+  const user = await getUser(username);
+  if (!user) {
+    throw new Error('User tidak ditemukan');
+  }
+  const salt = randomSalt();
+  const passwordHash = await hashPassword(newPassword, salt);
+  await writeUser(username, { salt, passwordHash, mustChangePassword: false });
+  return true;
+}
+
+export async function setRole(username, role) {
+  if (!(await getUser(username))) {
+    throw new Error('User tidak ditemukan');
+  }
+  await writeUser(username, { role });
+  return true;
+}
+
+export async function setActive(username, active) {
+  if (!(await getUser(username))) {
+    throw new Error('User tidak ditemukan');
+  }
+  await writeUser(username, { active: !!active });
+  return true;
+}
+
+export async function deleteUser(username) {
+  const key = normUsername(username);
+  if (key === 'admin') {
+    throw new Error('Akun admin utama tidak dapat dihapus');
+  }
+  if (!(await getUser(key))) {
+    throw new Error('User tidak ditemukan');
+  }
+  await db().collection(COLLECTION).doc(key).delete();
+  return true;
+}
+
+// ── two-factor (TOTP) ───────────────────────────────────────────────────────────
+// twoFactor = { enabled, secret, backupCodes: [{ salt, hash, used }] } — stored on
+// the authUsers doc (server-only), so the secret + backup-code hashes never leave
+// the server.
+
+export async function getTwoFactor(username) {
+  const u = await getUser(username);
+  return (u && u.twoFactor) || null;
+}
+
+export async function setTwoFactor(username, twoFactor) {
+  if (!(await getUser(username))) {
+    throw new Error('User tidak ditemukan');
+  }
+  await writeUser(username, { twoFactor: twoFactor == null ? null : twoFactor });
+  return true;
+}
+
+/** Generate `n` plaintext backup codes (XXXXX-XXXXX) for one-time display. */
+export function newBackupCodes(n = 8) {
+  const codes = [];
+  for (let i = 0; i < n; i++) {
+    const hex = randomBytes(5).toString('hex').toUpperCase();
+    codes.push(hex.slice(0, 5) + '-' + hex.slice(5, 10));
+  }
+  return codes;
+}
+
+/** Hash a batch of plaintext backup codes into stored {salt, hash, used} entries. */
+export function encodeBackupCodes(plainCodes) {
+  return plainCodes.map(code => {
+    const salt = randomSalt();
+    return { salt, hash: hashBackupCode(code, salt), used: false };
+  });
+}
+
+/**
+ * Verify `code` as an UNUSED backup code for the user; burn it (mark used) and
+ * persist on match. Returns true when a code was consumed.
+ */
+export async function verifyAndBurnBackupCode(username, code) {
+  const tf = await getTwoFactor(username);
+  if (!tf || !tf.enabled || !Array.isArray(tf.backupCodes)) {
+    return false;
+  }
+  for (const entry of tf.backupCodes) {
+    if (entry.used) {
+      continue;
+    }
+    if (safeEqualHex(hashBackupCode(code, entry.salt), entry.hash)) {
+      entry.used = true;
+      await writeUser(username, { twoFactor: tf });
+      return true;
+    }
+  }
+  return false;
+}
