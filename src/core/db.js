@@ -58,6 +58,11 @@ const COLLECTIONS = {
   ITEM_ADJUSTMENTS: 'itemAdjustments',
   ITEM_TRANSFERS: 'itemTransfers',
   WAREHOUSES: 'warehouses',
+  // Penerimaan Barang (sales-purchase-extras.js). Was missing here, so user-
+  // created receipts never synced to Firestore and were lost on device switch or
+  // storage clear; also feeds the (dormant) PO-side status derivation the same
+  // way deliveryOrders feed SOs.
+  GOODS_RECEIPTS: 'goodsReceipts',
   // Master data: employees (payroll module + department-driven RBAC role
   // assignment). Added so employee records sync across devices.
   EMPLOYEES: 'employees',
