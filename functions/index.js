@@ -31,7 +31,9 @@ export {
 
 export const api = onRequest(
   // Default region (us-central1) keeps the Hosting rewrite string form simple.
-  { cors: true, maxInstances: 10 },
+  // No built-in `cors` — the shared handler owns CORS so the ERP_API_ALLOWED_ORIGINS
+  // allowlist (and its Vary: Origin) is authoritative and never double-set.
+  { maxInstances: 10 },
   async (req, res) => {
     // Path arrives as /api/v1 or /api/v1/:resource. Pull the slug (if any) into
     // req.query.resource so the shared handler can route it; no slug → discovery.
@@ -41,6 +43,12 @@ export const api = onRequest(
     if (m && m[1]) {
       req.query.resource = decodeURIComponent(m[1]);
     }
-    await handleApi(req, res, { getCollection, apiKey: process.env.ERP_API_KEY });
+    await handleApi(req, res, {
+      getCollection,
+      apiKey: process.env.ERP_API_KEY,
+      apiKeyNext: process.env.ERP_API_KEY_NEXT, // optional: zero-downtime key rotation
+      allowedOrigins: process.env.ERP_API_ALLOWED_ORIGINS, // optional: pin CORS
+      rateLimit: { max: Number(process.env.ERP_API_RATE_MAX) || undefined },
+    });
   }
 );
