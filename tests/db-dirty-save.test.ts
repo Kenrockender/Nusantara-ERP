@@ -85,7 +85,13 @@ vi.mock('../src/core/local-store.js', () => ({
   kvSet: local.kvSet,
 }));
 
-import { saveDB, rebaselineSaved, flushPendingSaves, loadDB } from '../src/core/db.js';
+import {
+  saveDB,
+  rebaselineSaved,
+  flushPendingSaves,
+  loadDB,
+  _mergeRemoteSnapshot,
+} from '../src/core/db.js';
 
 const DB = () => (window as any).DB;
 
@@ -214,6 +220,58 @@ describe('saveDB(collectionName, data) explicit save', () => {
     await saveDB('settings', { tax: { ppnRate: 0.11 } });
     expect(fs.setDocCalls.length).toBe(1);
     expect(fs.setDocCalls[0].path).toBe('settings/default');
+  });
+});
+
+describe('mergeRemoteSnapshot (concurrent-edit guard)', () => {
+  it('remote wins for untouched docs, pending local edits survive', () => {
+    DB().customers = [
+      { id: 'M1', name: 'Old A' },
+      { id: 'M2', name: 'Old B' },
+    ];
+    rebaselineSaved();
+    DB().customers[0].name = 'Local edit'; // pending, un-flushed
+
+    const conflicts = _mergeRemoteSnapshot('customers', [
+      { id: 'M1', name: 'Old A' }, // unchanged remotely
+      { id: 'M2', name: 'Remote edit' }, // changed remotely
+      { id: 'M3', name: 'Remote new' },
+    ]);
+
+    const byId = Object.fromEntries(DB().customers.map((c: any) => [c.id, c.name]));
+    expect(byId.M1).toBe('Local edit'); // pending edit kept
+    expect(byId.M2).toBe('Remote edit'); // remote wins
+    expect(byId.M3).toBe('Remote new');
+    expect(conflicts).toBe(0); // M1 unchanged remotely → not a true conflict
+  });
+
+  it('counts true conflicts and still flushes the local edit afterwards', async () => {
+    DB().customers = [{ id: 'X1', name: 'Base' }];
+    rebaselineSaved();
+    DB().customers[0].name = 'Mine';
+
+    const conflicts = _mergeRemoteSnapshot('customers', [{ id: 'X1', name: 'Theirs' }]);
+    expect(conflicts).toBe(1);
+    expect(DB().customers[0].name).toBe('Mine'); // local wins in memory
+
+    // The pending edit stays dirty against the remote baseline, so the next
+    // flush writes it out (local-wins last-write, but no longer silent).
+    await saveDB();
+    expect(fs.allSets().map(s => s.path)).toContain('customers/X1');
+  });
+
+  it('keeps local deletions and resurrects docs deleted remotely mid-edit', () => {
+    DB().customers = [
+      { id: 'D1', name: 'DelMe' },
+      { id: 'D2', name: 'EditMe' },
+    ];
+    rebaselineSaved();
+    DB().customers = [{ id: 'D2', name: 'EditMe v2' }]; // D1 deleted, D2 edited locally
+
+    _mergeRemoteSnapshot('customers', [{ id: 'D1', name: 'DelMe' }]); // D2 gone remotely
+    const ids = DB().customers.map((c: any) => c.id);
+    expect(ids).not.toContain('D1'); // local delete kept (flush deletes remotely)
+    expect(ids).toContain('D2'); // local edit resurrected (flush re-creates)
   });
 });
 

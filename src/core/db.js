@@ -462,6 +462,22 @@ function stripUndefined(obj) {
   return obj;
 }
 
+// Identity stamped onto every write so a record carries who last touched it
+// (audit + concurrent-edit forensics). Read from the auth session written by
+// auth.js (SESSION_KEY 'erp_session') to avoid an import cycle with auth.js.
+function currentUserName() {
+  try {
+    const raw = sessionStorage.getItem('erp_session');
+    if (!raw) {
+      return null;
+    }
+    const s = JSON.parse(raw);
+    return (s && s.username) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /** Write only the dirty records of dirty collections, in ≤450-op batches. */
 async function flushDirtyCollections() {
   const dirty = [];
@@ -489,11 +505,16 @@ async function flushDirtyCollections() {
     }
   };
 
+  const updatedBy = currentUserName();
   for (const [name, diff] of dirty) {
     if (diff.kind === 'object') {
       batch.set(
         doc(firestore, name, 'default'),
-        stripUndefined({ ...diff.data, updatedAt: serverTimestamp() }),
+        stripUndefined({
+          ...diff.data,
+          updatedAt: serverTimestamp(),
+          ...(updatedBy ? { updatedBy } : {}),
+        }),
         { merge: true }
       );
       await addOp();
@@ -502,7 +523,11 @@ async function flushDirtyCollections() {
     for (const item of diff.sets) {
       batch.set(
         doc(firestore, name, String(item.id)),
-        stripUndefined({ ...item, updatedAt: serverTimestamp() }),
+        stripUndefined({
+          ...item,
+          updatedAt: serverTimestamp(),
+          ...(updatedBy ? { updatedBy } : {}),
+        }),
         { merge: true }
       );
       await addOp();
@@ -696,6 +721,7 @@ export async function saveDB(collectionName = null, data = null) {
  * Save a single collection
  */
 async function saveCollection(collectionName, data) {
+  const updatedBy = currentUserName();
   if (Array.isArray(data)) {
     // Save array items in chunks — a Firestore writeBatch caps at 500 ops.
     for (let i = 0; i < data.length; i += 450) {
@@ -707,6 +733,7 @@ async function saveCollection(collectionName, data) {
           {
             ...item,
             updatedAt: serverTimestamp(),
+            ...(updatedBy ? { updatedBy } : {}),
           },
           { merge: true }
         );
@@ -721,10 +748,89 @@ async function saveCollection(collectionName, data) {
       {
         ...data,
         updatedAt: serverTimestamp(),
+        ...(updatedBy ? { updatedBy } : {}),
       },
       { merge: true }
     );
   }
+}
+
+/**
+ * Fold a remote snapshot into an array collection without clobbering unsaved
+ * local edits. Remote docs win everywhere EXCEPT ids with pending (un-flushed)
+ * local changes, which stay local — the debounced saveDB flush writes them out
+ * moments later (local-wins last-write semantics, but no longer silent).
+ * The dirty baseline is set to the REMOTE state so those pending edits remain
+ * dirty and actually flush. Returns the number of true conflicts (docs changed
+ * both locally and remotely since the last sync).
+ */
+function mergeRemoteSnapshot(name, remoteData) {
+  const localDiff = diffCollection(name);
+  if (!localDiff || localDiff.kind !== 'array') {
+    DB[name] = remoteData;
+    markCollectionSaved(name, remoteData);
+    return 0;
+  }
+
+  const prev = _savedSnapshot.get(name);
+  const baseline = prev instanceof Map ? prev : new Map();
+  const pendingEdits = new Map(localDiff.sets.map(item => [String(item.id), item]));
+  const pendingDeletes = new Set(localDiff.deletes);
+  const remoteIds = new Set();
+  let conflicts = 0;
+  const merged = [];
+
+  for (const rec of remoteData) {
+    const id = String(rec.id);
+    remoteIds.add(id);
+    if (pendingDeletes.has(id)) {
+      continue; // deleted locally — the flush will delete it remotely too
+    }
+    const local = pendingEdits.get(id);
+    if (local) {
+      // Changed remotely as well (differs from what this device last synced)?
+      const base = baseline.get(id);
+      if (base === undefined || base !== JSON.stringify(rec)) {
+        conflicts++;
+      }
+      merged.push(local);
+    } else {
+      merged.push(rec);
+    }
+  }
+  // Pending local docs the server doesn't have (created here, or deleted
+  // remotely while being edited here) stay — the flush re-creates them.
+  for (const [id, local] of pendingEdits) {
+    if (!remoteIds.has(id)) {
+      merged.push(local);
+    }
+  }
+
+  DB[name] = merged;
+  markCollectionSaved(name, remoteData);
+  return conflicts;
+}
+
+// Test hook: exercised directly in tests (the onSnapshot plumbing is mocked away).
+export { mergeRemoteSnapshot as _mergeRemoteSnapshot };
+
+let _conflictToastAt = 0;
+function notifyEditConflict(name, count) {
+  // At most one warning per 10s — the flush right after resolves the state.
+  const now = Date.now();
+  if (now - _conflictToastAt < 10_000) {
+    return;
+  }
+  _conflictToastAt = now;
+  try {
+    showToast(
+      `Konflik edit di ${name} (${count} dokumen): perangkat lain menyimpan versi berbeda — perubahan Anda dipertahankan.`,
+      'warning'
+    );
+  } catch (_) {
+    /* ignore */
+  }
+  console.warn(`[DB] concurrent edit on ${name}: ${count} doc(s) changed locally AND remotely`);
 }
 
 /**
@@ -784,19 +890,23 @@ function setupRealtimeListeners() {
           data.push({ id: doc.id, ...doc.data() });
         });
 
-        // Update in-memory cache
+        // Update in-memory cache. Object collections replace outright; array
+        // collections merge so an incoming snapshot can't silently clobber local
+        // edits that haven't flushed yet — conflicts are surfaced, not dropped.
         if (isObjectCollection(dataKey)) {
           DB[dataKey] = data.length > 0 ? data[0] : getDefaultValue(dataKey);
+          // This collection now mirrors the server — re-baseline the dirty
+          // tracker so the next saveDB() doesn't rewrite synced records.
+          markCollectionSaved(dataKey, DB[dataKey]);
         } else {
-          DB[dataKey] = data;
+          const conflicts = mergeRemoteSnapshot(dataKey, data);
+          if (conflicts > 0) {
+            notifyEditConflict(dataKey, conflicts);
+          }
         }
         // SO/PO status is owned by the sync script (Accurate authority); do not
         // re-derive from DO linkage here (see applyDefaults note + _deriveOrderStatuses).
         syncDBGlobal();
-
-        // This collection now mirrors the server — re-baseline the dirty
-        // tracker so the next saveDB() doesn't rewrite synced records.
-        markCollectionSaved(dataKey, DB[dataKey]);
 
         // A remote snapshot just replaced a local collection. Re-baseline the
         // data-integrity snapshot (integrity.js) so the next local save diffs
