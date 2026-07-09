@@ -474,6 +474,10 @@
     open: addDocTab,
     close: closeDocTab,
     activate: setActive,
+    // Re-wrap freshly-defined viewX globals. lazy-views.js calls this after a
+    // lazy view chunk loads so its doc-openers (e.g. viewInvoiceDoc) get the
+    // inline sub-tab behaviour that init()'s one-time wrapViewFns() missed.
+    rewrap: wrapViewFns,
     state: function () {
       return state;
     },

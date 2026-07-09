@@ -2,9 +2,42 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
 
+// Lazy view-tier modules. Each is a self-contained IIFE that exposes only its
+// `window.render<View>` renderer (+ a couple of `viewX` doc-openers used by
+// doc-flow's "Jejak"). They are NOT in the core bundle: lazy-views.js loads the
+// matching chunk on first navigate() to that view (see public/classic/core/
+// lazy-views.js), keyed by the renderer global so it stays idempotent — if the
+// renderer is already defined (e.g. the smoke test evals everything at once),
+// no chunk is fetched. Emitted as /classic/view-<id>.js.
+export const classicLazy = {
+  ledger: ['public/classic/core/gl-view.js'],
+  financials: ['public/classic/core/financial-reports.js'],
+  quotations: ['public/classic/core/quotation-view.js'],
+  returns: ['public/classic/core/return-view.js'],
+  warehouse: ['public/classic/core/warehouse-view.js'],
+  adjustments: ['public/classic/core/adjust-view.js'],
+  invoices: ['public/classic/core/invoice-view.js'],
+};
+
+// Renderer global that each lazy view exposes — used by lazy-views.js to decide
+// whether the chunk still needs loading. Kept beside classicLazy so the two
+// never drift.
+export const classicLazyRenderers = {
+  ledger: 'renderLedger',
+  financials: 'renderFinancials',
+  quotations: 'renderQuotations',
+  returns: 'renderReturns',
+  warehouse: 'renderWarehouse',
+  adjustments: 'renderAdjustments',
+  invoices: 'renderInvoices',
+};
+
 // Dependency order matters — each script may rely on globals set by the previous one.
-// Exported so tests/classic-bundle-smoke.test.ts loads the exact same list.
-export const classicOrder = [
+// `classicAll` is the full ordered list of every classic file (source of truth
+// for ordering). `classicCore` (below) is classicAll minus the lazy view files —
+// that is what the core bundle serves/emits. `classicOrder` stays = classicAll so
+// tests/classic-bundle-smoke.test.ts still boots the entire surface in one pass.
+const classicAll = [
   // doc-registry.js migrated to src/classic/core/doc-registry.js (ES module).
   // window.DocRegistry is set by that module before this bundle loads.
   'public/classic/core/doc-engine.js',
@@ -60,36 +93,69 @@ export const classicOrder = [
   // unauthorized mutation before integrity.js/trash.js inner wraps run), and it
   // wraps window.navigate to gate buttons after each view renders.
   'public/classic/core/rbac.js',
+  // lazy-views.js MUST load last of all: it wraps window.navigate one final time
+  // (outermost) to intercept navigation to a lazy view, fetch its /classic/
+  // view-<id>.js chunk, then re-navigate to render it for real.
+  'public/classic/core/lazy-views.js',
 ];
 
+// The set of files pulled out of the core bundle and served as lazy chunks.
+const _lazyFiles = new Set(Object.values(classicLazy).flat());
+
+// Core bundle = every classic file except the lazy view modules.
+export const classicCore = classicAll.filter(p => !_lazyFiles.has(p));
+
+// Smoke test loads the entire surface (core + every lazy module) in one pass.
+export const classicOrder = classicAll;
+
 function classicBundlePlugin() {
-  function concatRaw() {
-    return classicOrder.map(p => readFileSync(resolve(__dirname, p), 'utf-8')).join('\n;\n');
+  function concat(files) {
+    return files.map(p => readFileSync(resolve(__dirname, p), 'utf-8')).join('\n;\n');
+  }
+
+  async function minifyBundle(code) {
+    const { minify } = await import('terser');
+    const out = await minify(code, {
+      compress: { drop_console: true, drop_debugger: true },
+      mangle: true,
+    });
+    return out.code;
   }
 
   return {
     name: 'classic-bundle',
 
-    // Dev server: serve concatenated (unminified) bundle on-the-fly.
+    // Dev server: serve the (unminified) core bundle + each lazy view chunk
+    // on-the-fly. Chunks are keyed by view-id → /classic/view-<id>.js.
     configureServer(server) {
       server.middlewares.use('/classic/bundle.js', (_req, res) => {
         res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-        res.end(concatRaw());
+        res.end(concat(classicCore));
       });
+      for (const [id, files] of Object.entries(classicLazy)) {
+        server.middlewares.use(`/classic/view-${id}.js`, (_req, res) => {
+          res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+          res.end(concat(files));
+        });
+      }
     },
 
-    // Build: concat + minify (drop_console) → emit as single hashed-by-SW asset.
+    // Build: concat + minify (drop_console). The core bundle and every lazy
+    // chunk are emitted as static assets (picked up by the SW's stale-while-
+    // revalidate cache, so lazy chunks work offline after first visit).
     async generateBundle() {
-      const { minify } = await import('terser');
-      const { code } = await minify(concatRaw(), {
-        compress: { drop_console: true, drop_debugger: true },
-        mangle: true,
-      });
       this.emitFile({
         type: 'asset',
         fileName: 'classic/bundle.js',
-        source: code,
+        source: await minifyBundle(concat(classicCore)),
       });
+      for (const [id, files] of Object.entries(classicLazy)) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `classic/view-${id}.js`,
+          source: await minifyBundle(concat(files)),
+        });
+      }
     },
   };
 }
