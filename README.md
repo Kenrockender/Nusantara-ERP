@@ -2,17 +2,19 @@
 
 A modern, lightweight Enterprise Resource Planning (ERP) system built for Nusantara businesses. Local-first by design — data lives in IndexedDB on the device — with an optional Firebase backend for cloud sync when configured.
 
-## 🚀 Version 3.1.0
+## 🚀 Version 3.2.0
 
 **Highlights:**
 
 - 💾 **Local-first storage**: full dataset persists in IndexedDB (works without any backend)
-- 🔥 **Optional Firestore sync**: real-time sync across devices when Firebase is configured
+- 🔥 **Optional Firestore sync**: real-time sync across devices, with concurrent-edit protection (`updatedBy` stamping + conflict surfacing)
 - 🛡️ **Data integrity**: audit trail, accounting period lock, and ledger self-check
-- 🔐 **RBAC + optional 2FA**: 5-role access control and TOTP two-factor auth
+- 🔐 **Hardened auth**: username login via Cloud Function custom tokens, PBKDF2-600k password hashing (OWASP), RBAC (5 roles) + optional TOTP 2FA
+- 🔒 **Hardened delivery**: strict Content-Security-Policy + HSTS/anti-clickjacking headers (no inline scripts)
 - 🌐 **Bilingual UI**: Indonesian ⇄ English toggle (i18n)
-- 🔌 **Integration API**: read-only `/api/v1` (Firebase Cloud Functions, API-key auth)
-- 📦 **Modular architecture**: ES modules + a single concatenated classic bundle
+- 🔌 **Integration API**: read-only `/api/v1` (Firebase Cloud Functions — API-key auth, rotation, rate limiting, CORS pinning, cursor pagination + delta sync)
+- ☁️ **Automated backups**: nightly server-side Firestore snapshots via a Cloud Scheduler function (14-day retention)
+- 📦 **Modular architecture**: ES modules + a classic core bundle with on-demand lazy-loaded view chunks
 - 📱 **PWA**: installable, offline-capable
 
 **📋 Quick Start:** [QUICK_START.md](./QUICK_START.md)
@@ -120,12 +122,14 @@ nusantara-erp/
 
 ## 🔐 Security
 
-- **Firebase Authentication** - Email/password authentication with secure session management
-- **Two-Factor Auth (optional)** - RFC 6238 TOTP (Google Authenticator/Authy/etc.) + one-time backup codes. App-level second factor stored in the local per-user credential store; gates the app UI after a correct password. Fits the local-first, per-operator deployment.
-- **Firestore Security Rules** - Row-level security for data access
-- **Storage Rules** - Secure file upload/download
+- **Username login** - Server-verified via a Cloud Function that mints a Firebase custom token (populates `request.auth` so Firestore rules pass); transparent local fallback when the server is unreachable
+- **PBKDF2-600k hashing** - Passwords hashed with PBKDF2-HMAC-SHA256 at the OWASP-recommended 600k iterations, both in-browser and server-side, with per-user salt and transparent lazy cost-upgrade of older hashes
+- **Default-credential lockdown** - Once an online login has succeeded on a device, an untouched default account is refused as a backdoor; first login forces a password change
+- **Strict CSP + security headers** - Content-Security-Policy with no `'unsafe-inline'` scripts (all bootstrap scripts externalised), plus HSTS, `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy and Permissions-Policy
+- **Two-Factor Auth (optional)** - RFC 6238 TOTP (Google Authenticator/Authy/etc.) + one-time backup codes; secrets held server-side (cross-device) with a local fallback
+- **Concurrent-edit protection** - Remote snapshots merge instead of clobbering unsaved local edits; true conflicts are surfaced and every write is stamped with `updatedBy`
+- **Firestore & Storage Rules** - Row-level access control; `authUsers` and `serverBackups` are server-only (never client-reachable)
 - **Session Timeout** - Auto logout after 30 minutes inactivity
-- **Password Reset** - Email-based password recovery
 
 **Setup Guide:** [Firebase Auth Setup](./docs/FIREBASE_AUTH_SETUP.md)
 
@@ -181,8 +185,8 @@ npm run test:run -- --clearCache
 
 ## 🔄 Version
 
-**Version:** 3.1.0  
-**Last Updated:** July 3, 2026  
+**Version:** 3.2.0  
+**Last Updated:** July 10, 2026  
 **Firebase SDK:** 12.12.0  
 **Vite:** 8.0.16  
 **Node.js:** 20.19.0+
@@ -209,6 +213,13 @@ npm run test:run -- --clearCache
 - [x] Multi-language support — Indonesian / English UI toggle (i18n)
 - [x] PDF export for invoices & reports
 - [x] Read-only integration API (Firebase Cloud Functions + API-key auth)
+- [x] Username login via Cloud Function custom tokens (+ transparent local fallback)
+- [x] Hardened auth — PBKDF2-600k hashing + default-credential lockdown
+- [x] Strict Content-Security-Policy + security headers (no inline scripts)
+- [x] Concurrent-edit protection — snapshot merge + conflict surfacing + `updatedBy` stamping
+- [x] API hardening — rate limiting, key rotation, CORS pinning, cursor pagination + delta sync
+- [x] Performance — on-demand lazy-loaded view chunks (split from the core bundle)
+- [x] Automated nightly Firestore backups (Cloud Scheduler function, 14-day retention)
 
 ### Planned 📋
 
