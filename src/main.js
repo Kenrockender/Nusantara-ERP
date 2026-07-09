@@ -54,7 +54,9 @@ import './core/stock.js';
 // SheetJS (xlsx) — exposed on window for the classic-layer "Import dari Excel"
 // feature (public/classic/core/excel-import.js). The classic bundle is plain
 // IIFE concatenation with no module system, so the parser is bridged via window.
-import * as XLSX from 'xlsx';
+// Uses the maintained @e965/xlsx fork (same API) — the stock npm `xlsx@0.18.5` is
+// frozen with unpatched Prototype-Pollution + ReDoS advisories.
+import * as XLSX from '@e965/xlsx';
 if (typeof window !== 'undefined') {
   window.XLSX = XLSX;
 }
