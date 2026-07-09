@@ -117,6 +117,9 @@ function firstAuthState() {
 // Session timeout (30 minutes of inactivity)
 const SESSION_TIMEOUT = 30 * 60 * 1000;
 const SESSION_KEY = 'erp_session';
+// Set once an online (Firebase custom-token) login has succeeded on this device.
+// After that, the untouched default local account is a backdoor and is refused.
+const FB_SEEN_KEY = 'erp_fb_login_seen';
 
 // First-run default login (username-based local auth). Each seeded user's
 // password is "<username>123" (see local-users.js). Shown as a hint on the
@@ -286,6 +289,11 @@ function finishServerLogin(username, data) {
   currentUser = userFromSession(u);
   createSession(u);
   _activeMode = 'firebase';
+  try {
+    localStorage.setItem(FB_SEEN_KEY, '1');
+  } catch (_) {
+    /* ignore */
+  }
   startSessionTimer();
   recordLoginEvent(u.username, u.displayName, 'login', 'firebase');
 }
@@ -321,6 +329,21 @@ async function localLogin(username, password) {
   const u = await verifyUser(username, password);
   if (!u) {
     return { ok: false, msg: 'Username atau password salah' };
+  }
+  // Once an online login has succeeded on this device, an untouched default
+  // account (still flagged mustChangePassword) is a backdoor — refuse it. A
+  // local account whose password was changed keeps working offline.
+  let fbSeen = false;
+  try {
+    fbSeen = localStorage.getItem(FB_SEEN_KEY) === '1';
+  } catch (_) {
+    /* ignore */
+  }
+  if (fbSeen && u.mustChangePassword) {
+    return {
+      ok: false,
+      msg: 'Login default lokal dinonaktifkan di perangkat ini — gunakan akun cloud Anda.',
+    };
   }
   // Second factor: when the account has 2FA switched on, hold the verified
   // identity and require a TOTP/backup code before creating the session.

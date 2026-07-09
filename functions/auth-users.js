@@ -7,15 +7,19 @@
 // so password hashes never reach any client.
 //
 // Password hashing MUST stay byte-compatible with the browser fallback store
-// (src/core/local-users.js): PBKDF2 / SHA-256, 100k iterations, 256-bit output,
-// hex-encoded, with a per-user hex salt. That lets us migrate a browser-seeded
-// account server-side (and vice-versa) without invalidating passwords.
+// (src/core/local-users.js): PBKDF2 / SHA-256, 256-bit output, hex-encoded, with
+// a per-user hex salt and a stored `iterations` count. That lets us migrate a
+// browser-seeded account server-side (and vice-versa) without invalidating
+// passwords. Records predating the 600k bump verify at 100k, then lazily
+// re-hash to the current cost on the next good login.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { randomBytes, pbkdf2 as _pbkdf2, createHash } from 'node:crypto';
 import { adminDb } from './admin.js';
 
-const PBKDF2_ITERATIONS = 100000;
+// OWASP-recommended cost for PBKDF2-HMAC-SHA256; keep in sync with local-users.js.
+const PBKDF2_ITERATIONS = 600000;
+const PBKDF2_ITERATIONS_LEGACY = 100000;
 const KEY_LEN = 32; // 256 bits
 const DIGEST = 'sha256';
 const COLLECTION = 'authUsers';
@@ -36,12 +40,12 @@ export function randomSalt() {
   return randomBytes(16).toString('hex');
 }
 
-export function hashPassword(password, saltHex) {
+export function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
   return new Promise((resolve, reject) => {
     _pbkdf2(
       Buffer.from(String(password), 'utf8'),
       Buffer.from(saltHex, 'hex'),
-      PBKDF2_ITERATIONS,
+      iterations,
       KEY_LEN,
       DIGEST,
       (err, derived) => (err ? reject(err) : resolve(derived.toString('hex')))
@@ -132,6 +136,7 @@ export async function ensureSeedUsers() {
       role: 'admin',
       salt,
       passwordHash,
+      iterations: PBKDF2_ITERATIONS,
       active: true,
       mustChangePassword: true,
       createdAt: Date.now(),
@@ -147,8 +152,27 @@ export async function verifyPassword(username, password) {
   if (!user || user.active === false || !user.salt || !user.passwordHash) {
     return null;
   }
-  const hash = await hashPassword(password || '', user.salt);
-  return safeEqualHex(hash, user.passwordHash) ? user : null;
+  // Records predating the 600k bump carry a lower (or missing) `iterations`.
+  const iterations = user.iterations || PBKDF2_ITERATIONS_LEGACY;
+  const hash = await hashPassword(password || '', user.salt, iterations);
+  if (!safeEqualHex(hash, user.passwordHash)) {
+    return null;
+  }
+  // Lazy cost upgrade: re-hash at the current iteration count now that we hold
+  // the correct plaintext, so the stored hash strengthens on next login.
+  if (iterations < PBKDF2_ITERATIONS) {
+    try {
+      const salt = randomSalt();
+      const passwordHash = await hashPassword(password || '', salt);
+      await writeUser(user.username, { salt, passwordHash, iterations: PBKDF2_ITERATIONS });
+      user.salt = salt;
+      user.passwordHash = passwordHash;
+      user.iterations = PBKDF2_ITERATIONS;
+    } catch (e) {
+      console.warn('[authUsers] PBKDF2 cost upgrade failed — keeping old hash:', e && e.message);
+    }
+  }
+  return user;
 }
 
 export async function createUser(username, displayName, password, role = 'viewer') {
@@ -172,6 +196,7 @@ export async function createUser(username, displayName, password, role = 'viewer
     role,
     salt,
     passwordHash,
+    iterations: PBKDF2_ITERATIONS,
     active: true,
     mustChangePassword: false,
     createdAt: Date.now(),
@@ -189,7 +214,12 @@ export async function setPassword(username, newPassword) {
   }
   const salt = randomSalt();
   const passwordHash = await hashPassword(newPassword, salt);
-  await writeUser(username, { salt, passwordHash, mustChangePassword: false });
+  await writeUser(username, {
+    salt,
+    passwordHash,
+    iterations: PBKDF2_ITERATIONS,
+    mustChangePassword: false,
+  });
   return true;
 }
 

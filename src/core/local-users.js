@@ -13,7 +13,11 @@
 const USERS_KEY = 'erp_users_v1';
 const LOG_KEY = 'erp_login_log_v1';
 const LOG_CAP = 500;
-const PBKDF2_ITERATIONS = 100000;
+// OWASP-recommended cost for PBKDF2-HMAC-SHA256. Records hashed before this bump
+// carry no `iterations` field (or a lower one) and verify at their stored count,
+// then get transparently re-hashed to the current cost on the next good login.
+const PBKDF2_ITERATIONS = 600000;
+const PBKDF2_ITERATIONS_LEGACY = 100000;
 
 // First-run accounts. All admins for now (per request). Default password is
 // "<username>123" and each is flagged mustChangePassword so operators are nudged
@@ -37,13 +41,13 @@ export function randomSalt() {
   crypto.getRandomValues(a);
   return bufToHex(a.buffer);
 }
-export async function hashPassword(password, saltHex) {
+export async function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, [
     'deriveBits',
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations, hash: 'SHA-256' },
     keyMaterial,
     256
   );
@@ -130,6 +134,7 @@ export async function ensureUsers() {
       role: 'admin',
       salt,
       passwordHash,
+      iterations: PBKDF2_ITERATIONS,
       active: true,
       mustChangePassword: true,
       createdAt: Date.now(),
@@ -163,8 +168,29 @@ export async function verifyUser(username, password) {
   await ensureUsers();
   const user = findUser(username);
   if (!user || user.active === false) return null;
-  const hash = await hashPassword(password || '', user.salt);
+  // Records predating the 600k bump carry a lower (or missing) `iterations`
+  // field; verify at whatever cost they were hashed with.
+  const iterations = user.iterations || PBKDF2_ITERATIONS_LEGACY;
+  const hash = await hashPassword(password || '', user.salt, iterations);
   if (hash !== user.passwordHash) return null;
+  // Lazy cost upgrade: now that we hold the correct plaintext, re-hash at the
+  // current iteration count so the stored hash strengthens on next login.
+  if (iterations < PBKDF2_ITERATIONS) {
+    try {
+      const salt = randomSalt();
+      const passwordHash = await hashPassword(password || '', salt);
+      const users = readUsers() || [];
+      const u = users.find(x => x.username === user.username);
+      if (u) {
+        u.salt = salt;
+        u.passwordHash = passwordHash;
+        u.iterations = PBKDF2_ITERATIONS;
+        writeUsers(users);
+      }
+    } catch (e) {
+      console.warn('[LocalUsers] PBKDF2 cost upgrade failed — keeping old hash:', e && e.message);
+    }
+  }
   return {
     username: user.username,
     displayName: user.displayName,
@@ -192,6 +218,7 @@ export async function addUser(username, displayName, password, role = 'admin') {
     role,
     salt,
     passwordHash,
+    iterations: PBKDF2_ITERATIONS,
     active: true,
     mustChangePassword: false,
     createdAt: Date.now(),
@@ -209,6 +236,7 @@ export async function setUserPassword(username, newPassword) {
   if (!u) throw new Error('User tidak ditemukan');
   u.salt = randomSalt();
   u.passwordHash = await hashPassword(newPassword, u.salt);
+  u.iterations = PBKDF2_ITERATIONS;
   u.mustChangePassword = false;
   writeUsers(users);
   return true;

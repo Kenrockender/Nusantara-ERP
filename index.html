@@ -9,18 +9,8 @@
 
   <!-- Smart-skip: returning users (flag set on login) go straight to the app and
        never see a flash of the marketing page. Runs before paint. Append ?stay=1
-       to always view this landing page. -->
-  <script>
-    (function () {
-      try {
-        var params = new URLSearchParams(location.search);
-        if (params.get('stay') === '1') return;
-        if (localStorage.getItem('cf-returning') === '1') {
-          location.replace('/app.html');
-        }
-      } catch (e) { /* ignore */ }
-    })();
-  </script>
+       to always view this landing page. External file so CSP script-src stays 'self'. -->
+  <script src="/landing-skip.js"></script>
 
   <!-- Social / OG -->
   <meta property="og:type" content="website">
