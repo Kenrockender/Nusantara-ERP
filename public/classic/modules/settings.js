@@ -870,9 +870,114 @@ function showInstallApp() {
   }, 50);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SYSTEM NOTIFICATIONS (Notification API permission + test)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// The alert scheduler (src/core/notifications.js, window.NSANotif) already
+// sends OS notifications for overdue invoices / low stock / over-budget — but
+// only once the user grants Notification permission. This card is where they
+// grant it.
+function showNotificationSettings() {
+  const supported = typeof Notification !== 'undefined';
+  const perm = supported ? Notification.permission : 'unsupported';
+
+  let statusHtml = '';
+  if (!supported) {
+    statusHtml = `
+      <div style="padding:12px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;font-size:12px;color:#92400E;line-height:1.5">
+        Browser ini tidak mendukung notifikasi sistem.
+      </div>`;
+  } else if (perm === 'granted') {
+    statusHtml = `
+      <div style="display:flex;align-items:center;gap:10px;padding:14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;color:#166534;margin-bottom:12px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <div style="font-size:13px;font-weight:600">Notifikasi aktif untuk perangkat ini.</div>
+      </div>
+      <button class="btn" id="notif-test" style="width:100%;padding:11px;font-size:13px">Kirim Notifikasi Percobaan</button>`;
+  } else if (perm === 'denied') {
+    statusHtml = `
+      <div style="padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:12px;color:#991B1B;line-height:1.6">
+        Notifikasi <strong>diblokir</strong> untuk situs ini. Buka pengaturan situs di browser
+        (ikon gembok di address bar → Notifikasi → Izinkan), lalu muat ulang halaman.
+      </div>`;
+  } else {
+    statusHtml = `
+      <button class="btn" id="notif-enable" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:13px;font-weight:700">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Aktifkan Notifikasi
+      </button>
+      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:10px">
+        Browser akan meminta izin menampilkan notifikasi.
+      </div>`;
+  }
+
+  const body = `
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px">
+      Dapatkan peringatan di perangkat Anda — juga saat aplikasi sedang tidak dibuka
+      (mode terpasang/PWA): piutang &amp; hutang jatuh tempo, invoice outstanding,
+      stok di bawah minimum, dan anggaran terlampaui. Pemeriksaan berjalan otomatis
+      setiap 4 jam selama aplikasi berjalan.
+    </div>
+    ${statusHtml}`;
+
+  openModal(
+    'Notifikasi Sistem',
+    body,
+    `<button class="btn-ghost" data-action="closeModal">Tutup</button>`
+  );
+
+  setTimeout(() => {
+    document.getElementById('notif-enable')?.addEventListener('click', async () => {
+      const result = window.NSANotif
+        ? await window.NSANotif.requestPermission()
+        : await Notification.requestPermission();
+      closeModal();
+      if (result === 'granted') {
+        showToast('Notifikasi diaktifkan ✓', 'success');
+        if (window.NSANotif) {
+          window.NSANotif.checkAlerts();
+        }
+      } else if (result === 'denied') {
+        showToast('Izin notifikasi ditolak', 'warning');
+      }
+      // Re-open with the new state on a later tick — open/close in the same
+      // frame trips the modal's RAF transition (known gotcha).
+      setTimeout(showNotificationSettings, 150);
+    });
+
+    document.getElementById('notif-test')?.addEventListener('click', () => {
+      try {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: 'Nusantara ERP — Percobaan',
+            body: 'Notifikasi sistem berfungsi di perangkat ini.',
+            tag: 'nusantara-test',
+            icon: '/icons/icon-192x192.png',
+          });
+        } else {
+          new Notification('Nusantara ERP — Percobaan', {
+            body: 'Notifikasi sistem berfungsi di perangkat ini.',
+            tag: 'nusantara-test',
+          });
+        }
+        showToast('Notifikasi percobaan dikirim', 'success');
+      } catch (_e) {
+        showToast('Gagal mengirim notifikasi percobaan', 'warning');
+      }
+    });
+  }, 50);
+}
+
 // Register actions
 ERP.registerAction('installPwaApp', function () {
   showInstallApp();
+  return true;
+});
+
+ERP.registerAction('manageNotifications', function () {
+  showNotificationSettings();
   return true;
 });
 
