@@ -2,14 +2,15 @@
 
 A modern, lightweight Enterprise Resource Planning (ERP) system built for Nusantara businesses. Local-first by design — data lives in IndexedDB on the device — with an optional Firebase backend for cloud sync when configured.
 
-## 🚀 Version 3.2.0
+## 🚀 Version 3.3.0
 
 **Highlights:**
 
 - 💾 **Local-first storage**: full dataset persists in IndexedDB (works without any backend)
 - 🔥 **Optional Firestore sync**: real-time sync across devices, with concurrent-edit protection (`updatedBy` stamping + conflict surfacing)
+- 📊 **Built-in reports**: Laporan Umur Piutang (AR aging), Kartu Stok (per-item movement card that reconciles to on-hand), and Kartu Piutang/Hutang (per-party running statement)
 - 🛡️ **Data integrity**: audit trail, accounting period lock, and ledger self-check
-- 🔐 **Hardened auth**: username login via Cloud Function custom tokens, PBKDF2-600k password hashing (OWASP), RBAC (5 roles) + optional TOTP 2FA
+- 🔐 **Hardened auth**: username login via Cloud Function custom tokens, PBKDF2-600k password hashing (OWASP), brute-force login throttle + admin session revocation, RBAC (5 roles) + optional TOTP 2FA
 - 🔒 **Hardened delivery**: strict Content-Security-Policy + HSTS/anti-clickjacking headers (no inline scripts)
 - 🌐 **Bilingual UI**: Indonesian ⇄ English toggle (i18n)
 - 🔌 **Integration API**: read-only `/api/v1` (Firebase Cloud Functions — API-key auth, rotation, rate limiting, CORS pinning, cursor pagination + delta sync)
@@ -124,7 +125,8 @@ nusantara-erp/
 
 - **Username login** - Server-verified via a Cloud Function that mints a Firebase custom token (populates `request.auth` so Firestore rules pass); transparent local fallback when the server is unreachable
 - **PBKDF2-600k hashing** - Passwords hashed with PBKDF2-HMAC-SHA256 at the OWASP-recommended 600k iterations, both in-browser and server-side, with per-user salt and transparent lazy cost-upgrade of older hashes
-- **Default-credential lockdown** - Once an online login has succeeded on a device, an untouched default account is refused as a backdoor; first login forces a password change
+- **Default-credential lockdown** - Once an online login has succeeded on a device, an untouched default account is refused as a backdoor; first login forces a password change. Seeded accounts get a random password (or `SEED_ADMIN_PASSWORD`), never a guessable `<username>123`
+- **Brute-force throttle + session revocation** - Online login is rate-limited (8 failures / 15-min window, keyed by username+IP, applied before the store lookup so unknown usernames aren't an oracle); admin password/role/deactivate/delete operations revoke the target's refresh tokens so a stale role claim can't outlive the change
 - **Strict CSP + security headers** - Content-Security-Policy with no `'unsafe-inline'` scripts (all bootstrap scripts externalised), plus HSTS, `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy and Permissions-Policy
 - **Two-Factor Auth (optional)** - RFC 6238 TOTP (Google Authenticator/Authy/etc.) + one-time backup codes; secrets held server-side (cross-device) with a local fallback
 - **Concurrent-edit protection** - Remote snapshots merge instead of clobbering unsaved local edits; true conflicts are surfaced and every write is stamped with `updatedBy`
@@ -185,7 +187,7 @@ npm run test:run -- --clearCache
 
 ## 🔄 Version
 
-**Version:** 3.2.0  
+**Version:** 3.3.0  
 **Last Updated:** July 10, 2026  
 **Firebase SDK:** 12.12.0  
 **Vite:** 8.0.16  
@@ -220,6 +222,10 @@ npm run test:run -- --clearCache
 - [x] API hardening — rate limiting, key rotation, CORS pinning, cursor pagination + delta sync
 - [x] Performance — on-demand lazy-loaded view chunks (split from the core bundle)
 - [x] Automated nightly Firestore backups (Cloud Scheduler function, 14-day retention)
+- [x] Reports — Laporan Umur Piutang (AR aging), Kartu Stok, Kartu Piutang/Hutang
+- [x] Brute-force login throttle + admin-driven session revocation + random seed credentials
+- [x] Notifikasi Sistem settings card — grant OS-notification permission + send a test
+- [x] `goodsReceipts` (Penerimaan Barang) sync to Firestore
 
 ### Planned 📋
 
