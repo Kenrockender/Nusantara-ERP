@@ -125,7 +125,6 @@ const FB_SEEN_KEY = 'erp_fb_login_seen';
 // password is "<username>123" (see local-users.js). Shown as a hint on the
 // login screen until the password is changed.
 const DEFAULT_USERNAME = 'admin';
-const DEFAULT_PASSWORD = 'admin123';
 
 let sessionTimer = null;
 let currentUser = null;
@@ -690,16 +689,6 @@ export function setupLoginScreen() {
     errorBox.style.borderColor = 'var(--danger)';
     errorBox.textContent = msg;
   };
-
-  // First-run hint: show the default admin credentials until the password is
-  // changed. Seeded users (firna / richard / lisa) sign in with "<username>123".
-  if (errorBox) {
-    errorBox.style.display = 'block';
-    errorBox.style.background = 'var(--surface)';
-    errorBox.style.color = 'var(--muted)';
-    errorBox.style.borderColor = 'var(--border)';
-    errorBox.textContent = `Login default — Username: ${DEFAULT_USERNAME} · Password: ${DEFAULT_PASSWORD} (firna/richard/lisa: username + "123")`;
-  }
 
   // Prefill the default username for convenience.
   if (emailInput && !emailInput.value) {
