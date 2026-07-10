@@ -58,7 +58,11 @@
 // core classic bundle into on-demand /classic/view-<id>.js chunks (lazy-views.js).
 // Returning users must drop the old monolithic bundle.js; the split chunks are
 // runtime-cached (stale-while-revalidate) on first navigation to each view.
-const CACHE_VERSION = 'v1.1.0';
+// Bumped to v1.1.1: three NSA-parity reports — Laporan Umur Piutang (AR aging) on
+// the Finance page, Kartu Stok (per-item movement card in the item detail), and
+// Kartu Piutang/Hutang (per-party running statement in the customer/supplier
+// detail). Cache bust so returning users pick up the updated classic bundle.
+const CACHE_VERSION = 'v1.1.1';
 const CACHE_NAME = `nusantara-erp-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `nusantara-erp-runtime-${CACHE_VERSION}`;
 const IMAGE_CACHE = `nusantara-erp-images-${CACHE_VERSION}`;

@@ -1446,7 +1446,171 @@ function viewItem(id) {
     </div>
   `,
     `<button class="btn-ghost" data-action="closeModal">Tutup</button>
+   <button class="btn-ghost" data-action="stockCard" data-id="${escapeHtml(id)}"
+     style="display:flex;align-items:center;gap:5px">
+     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+       <path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+     Kartu Stok
+   </button>
    <button class="btn" data-action="editItem" data-id="${escapeHtml(id)}">Edit</button>`
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// § 3b  KARTU STOK — per-item movement card with running balance
+// ────────────────────────────────────────────────────────────────────────────────
+// Mirrors cost-ledger.js buildMovements EXACTLY (PO status Received = in, item
+// adjustments = in/out, SO status Delivered = out) — i.e. the same basis that
+// actually drives item.stock via applyStockMutation. The opening balance is
+// derived as (current stock − net movement) so the card always reconciles to the
+// current on-hand qty. (DOs/Surat Jalan are stock-neutral and intentionally not a
+// movement source here.)
+// ════════════════════════════════════════════════════════════════════════════════
+
+function _stockCardMovements(itemId) {
+  const moves = [];
+  (DB.purchaseOrders || []).forEach(o => {
+    if (o.status !== 'Received') return;
+    (o.lines || []).forEach(l => {
+      if (l.itemId !== itemId) return;
+      const qty = Number(l.qty) || 0;
+      if (!qty) return;
+      moves.push({
+        date: o.date,
+        pr: 1,
+        ref: docNum(o.number, o.id),
+        refId: o.id,
+        action: 'viewPO',
+        label: 'Penerimaan (PO)',
+        inQty: qty,
+        outQty: 0,
+      });
+    });
+  });
+  (DB.itemAdjustments || []).forEach(a => {
+    (a.lines || []).forEach(l => {
+      if (l.itemId !== itemId) return;
+      const qty = Number(l.qty) || 0;
+      if (!qty) return;
+      const out = l.type === 'out';
+      moves.push({
+        date: a.date,
+        pr: out ? 2 : 1,
+        ref: docNum(a.number, a.id),
+        refId: a.id,
+        action: null,
+        label: out ? 'Penyesuaian (−)' : 'Penyesuaian (+)',
+        inQty: out ? 0 : qty,
+        outQty: out ? qty : 0,
+      });
+    });
+  });
+  (DB.salesOrders || []).forEach(o => {
+    if (o.status !== 'Delivered') return;
+    (o.lines || []).forEach(l => {
+      if (l.itemId !== itemId) return;
+      const qty = Number(l.qty) || 0;
+      if (!qty) return;
+      moves.push({
+        date: o.date,
+        pr: 2,
+        ref: docNum(o.number, o.id),
+        refId: o.id,
+        action: 'viewSO',
+        label: 'Pengiriman (SO)',
+        inQty: 0,
+        outQty: qty,
+      });
+    });
+  });
+  moves.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.pr - b.pr));
+  return moves;
+}
+
+function showStockCard(id) {
+  const item = DB.inventoryItems.find(i => String(i.id) === String(id));
+  if (!item) {
+    showToast('Item tidak ditemukan', 'danger');
+    return;
+  }
+  const r3 = n => Math.round((Number(n) || 0) * 1000) / 1000;
+  const moves = _stockCardMovements(item.id);
+  const net = moves.reduce((s, m) => s + m.inQty - m.outQty, 0);
+  const current = Number(item.stock) || 0;
+  const opening = r3(current - net);
+  const unit = escapeHtml(item.unit || '');
+  const qtyCell = (v, color) =>
+    v
+      ? `<span style="font-weight:700;color:${color}">${r3(v)}</span>`
+      : '<span style="color:var(--border)">—</span>';
+
+  let bal = opening;
+  const bodyRows = moves
+    .map(m => {
+      bal = r3(bal + m.inQty - m.outQty);
+      const refCell = m.action
+        ? `<a data-action="${m.action}" data-id="${escapeHtml(m.refId)}" style="color:var(--primary);cursor:pointer;text-decoration:underline">${escapeHtml(m.ref)}</a>`
+        : escapeHtml(m.ref);
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px;color:var(--muted);white-space:nowrap">${escapeHtml(m.date)}</td>
+        <td style="padding:6px 10px;font-size:12px">${escapeHtml(m.label)}</td>
+        <td style="padding:6px 10px;font-size:11px">${refCell}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right">${qtyCell(m.inQty, '#34C759')}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right">${qtyCell(m.outQty, '#FF3B30')}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right;font-weight:800">${r3(bal)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const body = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
+      <div><span style="color:var(--muted)">Satuan:</span> <strong>${unit || '—'}</strong></div>
+      <div><span style="color:var(--muted)">Saldo Awal (perkiraan):</span> <strong>${opening} ${unit}</strong></div>
+      <div><span style="color:var(--muted)">Stok Saat Ini:</span> <strong style="color:var(--primary)">${r3(current)} ${unit}</strong></div>
+      <div><span style="color:var(--muted)">Total Mutasi:</span> <strong>${moves.length}</strong></div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:60vh">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--bg);position:sticky;top:0">
+          <tr>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Tanggal</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Keterangan</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Ref</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border);color:#34C759">Masuk</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border);color:#FF3B30">Keluar</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border)">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border);background:var(--bg)">
+            <td style="padding:6px 10px;font-size:11px;color:var(--muted)">—</td>
+            <td style="padding:6px 10px;font-size:12px;font-style:italic;color:var(--muted)">Saldo Awal</td>
+            <td style="padding:6px 10px"></td>
+            <td style="padding:6px 10px"></td>
+            <td style="padding:6px 10px"></td>
+            <td style="padding:6px 10px;font-size:12px;text-align:right;font-weight:800">${opening}</td>
+          </tr>
+          ${
+            bodyRows ||
+            `<tr><td colspan="6" style="padding:16px;text-align:center;font-size:12px;color:var(--muted)">Belum ada mutasi tercatat untuk item ini.</td></tr>`
+          }
+        </tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border);background:var(--bg)">
+            <td colspan="3" style="padding:7px 10px;font-size:12px;font-weight:800;text-align:right">Stok Saat Ini</td>
+            <td colspan="2"></td>
+            <td style="padding:7px 10px;font-size:13px;font-weight:800;text-align:right;color:var(--primary)">${r3(current)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+
+  openModal(
+    `Kartu Stok — ${escapeHtml(item.name)}`,
+    body,
+    `<button class="btn-ghost" data-action="viewItem" data-id="${escapeHtml(id)}">← Detail Item</button>
+     <button class="btn" data-action="closeModal">Tutup</button>`
   );
 }
 
@@ -1710,6 +1874,7 @@ function viewCustomer(id) {
     </div>
   `,
     `<button class="btn-ghost" data-action="closeModal">Tutup</button>
+   <button class="btn-ghost" data-action="custStatement" data-id="${escapeHtml(c.id)}">Kartu Piutang</button>
    <button class="btn" data-action="editCustomer" data-id="${escapeHtml(c.id)}">Edit</button>`
   );
 }
@@ -1927,7 +2092,140 @@ function viewSupplier(id) {
     </div>
   `,
     `<button class="btn-ghost" data-action="closeModal">Tutup</button>
+   <button class="btn-ghost" data-action="suppStatement" data-id="${escapeHtml(s.id)}">Kartu Hutang</button>
    <button class="btn" data-action="editSupplier" data-id="${escapeHtml(s.id)}">Edit</button>`
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// § 7b  KARTU PIUTANG / HUTANG — per-party running statement
+// ────────────────────────────────────────────────────────────────────────────────
+// Chronological ledger for one customer (AR) or supplier (AP): each faktur is a
+// debit (grand total incl. PPN), each receipt/payment a credit, with a running
+// balance ending at the party's outstanding balance. Rows link to the document.
+// Matches both the id field and the party name so imported records are covered.
+// ════════════════════════════════════════════════════════════════════════════════
+
+function showPartyStatement(kind, id) {
+  const isCust = kind === 'customer';
+  const party = (isCust ? DB.customers : DB.suppliers).find(p => String(p.id) === String(id));
+  if (!party) {
+    showToast(isCust ? 'Pelanggan tidak ditemukan' : 'Supplier tidak ditemukan', 'danger');
+    return;
+  }
+  const invColl = isCust ? 'salesInvoices' : 'purchaseInvoices';
+  const payColl = isCust ? 'salesReceipts' : 'purchasePayments';
+  const idField = isCust ? 'customerId' : 'supplierId';
+  const nameField = isCust ? 'customer' : 'supplier';
+  const DROP = new Set(['Cancelled', 'Void']);
+  const grand = i => {
+    const amt = Number(i.amount) || 0;
+    return i.taxInclusive ? amt : amt + (Number(i.tax) || 0);
+  };
+  const matchesParty = d =>
+    String(d[idField]) === String(id) || (d[nameField] && d[nameField] === party.name);
+
+  const invoices = (DB[invColl] || []).filter(i => matchesParty(i) && !DROP.has(i.status));
+  const invIds = new Set(invoices.map(i => i.id));
+  const payments = (DB[payColl] || []).filter(
+    p => matchesParty(p) || (p.invoiceId && invIds.has(p.invoiceId))
+  );
+
+  const entries = [];
+  invoices.forEach(i =>
+    entries.push({
+      date: i.date || '',
+      ref: docNum(i.number, i.id),
+      refId: i.id,
+      type: isCust ? 'SI' : 'PI',
+      label: isCust ? 'Faktur Penjualan' : 'Faktur Pembelian',
+      debit: grand(i),
+      credit: 0,
+    })
+  );
+  payments.forEach(p =>
+    entries.push({
+      date: p.date || '',
+      ref: docNum(p.number, p.id),
+      refId: p.id,
+      type: isCust ? 'SR' : 'PP',
+      label: isCust ? 'Penerimaan Pembayaran' : 'Pembayaran',
+      debit: 0,
+      credit: Number(p.amount) || 0,
+    })
+  );
+  // Oldest first; on the same date a faktur (debit) precedes its settlement.
+  entries.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : b.debit - a.debit));
+
+  const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
+  const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+  const outstanding = totalDebit - totalCredit;
+  const m = v => idrFull(Math.round(v));
+  const cell = (v, color) =>
+    v
+      ? `<span style="font-weight:700;color:${color}">${m(v)}</span>`
+      : '<span style="color:var(--border)">—</span>';
+
+  let bal = 0;
+  const rows = entries
+    .map(e => {
+      bal += e.debit - e.credit;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px;color:var(--muted);white-space:nowrap">${escapeHtml(e.date)}</td>
+        <td style="padding:6px 10px;font-size:12px">${escapeHtml(e.label)}</td>
+        <td style="padding:6px 10px;font-size:11px">
+          <a data-action="invView" data-id="${escapeHtml(e.refId)}" data-type="${e.type}"
+             style="color:var(--primary);cursor:pointer;text-decoration:underline">${escapeHtml(e.ref)}</a></td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right">${cell(e.debit, '#FF3B30')}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right">${cell(e.credit, '#34C759')}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:right;font-weight:800">${m(bal)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const debitHdr = isCust ? 'Tagihan' : 'Hutang';
+  const creditHdr = isCust ? 'Terima' : 'Bayar';
+  const balLabel = isCust ? 'Saldo Piutang' : 'Saldo Hutang';
+  const body = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
+      <div><span style="color:var(--muted)">${isCust ? 'Total Tagihan' : 'Total Hutang'}:</span> <strong>${m(totalDebit)}</strong></div>
+      <div><span style="color:var(--muted)">${isCust ? 'Total Diterima' : 'Total Dibayar'}:</span> <strong>${m(totalCredit)}</strong></div>
+      <div><span style="color:var(--muted)">${balLabel}:</span> <strong style="color:${outstanding > 0 ? 'var(--danger)' : 'var(--primary)'}">${m(outstanding)}</strong></div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:60vh">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--bg);position:sticky;top:0">
+          <tr>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Tanggal</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Keterangan</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:left;border-bottom:1px solid var(--border)">Dokumen</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border);color:#FF3B30">${debitHdr}</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border);color:#34C759">${creditHdr}</th>
+            <th style="padding:7px 10px;font-size:11px;font-weight:700;text-align:right;border-bottom:1px solid var(--border)">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            rows ||
+            `<tr><td colspan="6" style="padding:16px;text-align:center;font-size:12px;color:var(--muted)">Belum ada faktur atau pembayaran untuk ${escapeHtml(party.name)}.</td></tr>`
+          }
+        </tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border);background:var(--bg)">
+            <td colspan="3" style="padding:7px 10px;font-size:12px;font-weight:800;text-align:right">${balLabel}</td>
+            <td style="padding:7px 10px;font-size:12px;text-align:right;font-weight:700">${m(totalDebit)}</td>
+            <td style="padding:7px 10px;font-size:12px;text-align:right;font-weight:700">${m(totalCredit)}</td>
+            <td style="padding:7px 10px;font-size:13px;text-align:right;font-weight:800;color:${outstanding > 0 ? 'var(--danger)' : 'var(--primary)'}">${m(outstanding)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+
+  openModal(
+    `${isCust ? 'Kartu Piutang' : 'Kartu Hutang'} — ${escapeHtml(party.name)}`,
+    body,
+    `<button class="btn-ghost" data-action="${isCust ? 'viewCustomer' : 'viewSupplier'}" data-id="${escapeHtml(id)}">← Detail</button>
+     <button class="btn" data-action="closeModal">Tutup</button>`
   );
 }
 

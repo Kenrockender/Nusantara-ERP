@@ -1000,6 +1000,7 @@ function renderFinance() {
       .join('')}
   </div>
   ${integrityPanel}
+  ${_piutangAgingSection()}
   ${_hutangAgingSection()}`;
 }
 
@@ -2185,6 +2186,9 @@ document.addEventListener('click', async e => {
     case 'viewItem':
       viewItem(id);
       break;
+    case 'stockCard':
+      showStockCard(id);
+      break;
     case 'editItem':
       editItem(id);
       break;
@@ -2234,6 +2238,9 @@ document.addEventListener('click', async e => {
     case 'viewCustomer':
       viewCustomer(id);
       break;
+    case 'custStatement':
+      showPartyStatement('customer', id);
+      break;
     case 'editCustomer':
       editCustomer(id);
       break;
@@ -2247,6 +2254,9 @@ document.addEventListener('click', async e => {
       break;
     case 'viewSupplier':
       viewSupplier(id);
+      break;
+    case 'suppStatement':
+      showPartyStatement('supplier', id);
       break;
     case 'editSupplier':
       editSupplier(id);
@@ -3134,6 +3144,133 @@ function _hutangAgingSection() {
           ? `<div style="font-size:16px;font-weight:800;color:#FF9F0A">${idr(hutangTotal)}</div>`
           : ''
       }
+    </div>
+    ${agingGrid}
+    ${tableHtml}
+  </div>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// § 12b  PIUTANG AGING (AR) — receivables by age, the counterpart to hutang aging
+// ────────────────────────────────────────────────────────────────────────────────
+// Based on Faktur Penjualan (salesInvoices) that aren't yet fully paid, netting any
+// receipts (salesReceipts) and using the grand total (DPP + PPN). Bucketed by the
+// faktur's age into 0–30 / 31–60 / 61–90 / >90 days.
+// ════════════════════════════════════════════════════════════════════════════════
+
+function _piutangAgingSection() {
+  const PAID = new Set(['Paid', 'Lunas', 'Cancelled', 'Void']);
+  const receipts = DB.salesReceipts || [];
+  const grand = i => {
+    const amt = Number(i.amount) || 0;
+    return i.taxInclusive ? amt : amt + (Number(i.tax) || 0);
+  };
+  const paidOf = i =>
+    receipts
+      .filter(r => r.invoiceId === i.id && (r.status === 'Posted' || !r.status))
+      .reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  const todayMs = Date.now();
+  const rows = (DB.salesInvoices || [])
+    .filter(i => !PAID.has(i.status))
+    .map(i => {
+      const bal = Math.max(0, grand(i) - paidOf(i));
+      const days = Math.floor((todayMs - new Date(i.date).getTime()) / 86400000);
+      return { ...i, bal, days };
+    })
+    .filter(r => r.bal > 0.5);
+
+  const piutangTotal = rows.reduce((s, r) => s + r.bal, 0);
+  const buckets = { b0: [], b30: [], b60: [], b90: [] };
+  rows.forEach(r => {
+    if (r.days <= 30) {
+      buckets.b0.push(r);
+    } else if (r.days <= 60) {
+      buckets.b30.push(r);
+    } else if (r.days <= 90) {
+      buckets.b60.push(r);
+    } else {
+      buckets.b90.push(r);
+    }
+  });
+
+  const bucketCards = [
+    { label: '0–30 Hari', list: buckets.b0, color: '#34C759' },
+    { label: '31–60 Hari', list: buckets.b30, color: '#FFCC00' },
+    { label: '61–90 Hari', list: buckets.b60, color: '#FF9F0A' },
+    { label: '>90 Hari (Prioritas)', list: buckets.b90, color: '#FF3B30' },
+  ];
+
+  const agingGrid = `
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+    ${bucketCards
+      .map(b => {
+        const val = b.list.reduce((s, r) => s + r.bal, 0);
+        const active = b.list.length > 0;
+        return `<div style="background:var(--bg);border-radius:8px;padding:12px;
+                border:1.5px solid ${active ? b.color : 'var(--border)'}">
+        <div style="font-size:11px;font-weight:700;color:${b.color};margin-bottom:6px">${escapeHtml(b.label)}</div>
+        <div style="font-size:22px;font-weight:800;color:${active ? b.color : 'var(--muted)'}">${b.list.length}<span style="font-size:13px;font-weight:500"> Faktur</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${idr(val)}</div>
+      </div>`;
+      })
+      .join('')}
+  </div>`;
+
+  const tableHtml =
+    rows.length === 0
+      ? `<div style="text-align:center;font-size:13px;color:var(--muted);padding:20px 0">
+         ✓ Tidak ada piutang Faktur Penjualan yang belum lunas
+       </div>`
+      : `<div class="table-wrap"><table>
+        <thead><tr>
+          <th>No. Faktur</th>
+          <th>Pelanggan</th>
+          <th>Tanggal</th>
+          <th style="text-align:right">Sisa Tagihan</th>
+          <th style="text-align:center">Umur</th>
+          <th>Aksi</th>
+        </tr></thead>
+        <tbody>
+          ${[...buckets.b90, ...buckets.b60, ...buckets.b30, ...buckets.b0]
+            .map(r => {
+              const ageColor =
+                r.days > 90
+                  ? '#FF3B30'
+                  : r.days > 60
+                    ? '#FF9F0A'
+                    : r.days > 30
+                      ? '#FFCC00'
+                      : '#34C759';
+              const viewBtn =
+                typeof window.rowActionBtn === 'function'
+                  ? window.rowActionBtn('view', 'invView', r.id, 'SI')
+                  : '';
+              return `<tr data-action="invView" data-id="${escapeHtml(r.id)}" data-type="SI" style="cursor:pointer">
+              <td class="td-p" style="font-size:11px;font-weight:700;color:var(--primary)">${escapeHtml(docNum(r.number, r.id))}</td>
+              <td class="td-p" style="font-size:13px;font-weight:600">${escapeHtml(r.customer || '—')}</td>
+              <td class="td-p" style="font-size:11px;color:var(--muted)">${escapeHtml(r.date)}</td>
+              <td class="td-p" style="font-size:13px;font-weight:800;text-align:right">${idr(r.bal)}</td>
+              <td class="td-p" style="text-align:center">
+                <span style="font-weight:700;color:${ageColor};font-size:12px">${r.days}h</span>
+              </td>
+              <td class="td-p">${viewBtn}</td>
+            </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table></div>`;
+
+  return `
+  <div class="card" style="margin-top:0">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <div>
+        <div style="font-size:14px;font-weight:700">Piutang Pelanggan — Aging Analysis</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">
+          ${rows.length} Faktur Penjualan belum lunas · Total piutang: ${idr(piutangTotal)}
+        </div>
+      </div>
+      ${piutangTotal > 0 ? `<div style="font-size:16px;font-weight:800;color:#0A84FF">${idr(piutangTotal)}</div>` : ''}
     </div>
     ${agingGrid}
     ${tableHtml}
