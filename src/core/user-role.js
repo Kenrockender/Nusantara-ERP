@@ -75,7 +75,15 @@ export async function resolveUserRole() {
   const mode = getAuthMode();
 
   if (!user) {
-    return { uid: null, email: null, displayName: null, role: 'pending', active: false, mode, source: 'none' };
+    return {
+      uid: null,
+      email: null,
+      displayName: null,
+      role: 'pending',
+      active: false,
+      mode,
+      source: 'none',
+    };
   }
 
   const email = user.email || '';
@@ -133,7 +141,15 @@ export async function resolveUserRole() {
         } catch (_) {
           /* rules will still treat them as admin via email */
         }
-        return { uid: user.uid, email, displayName, role: 'admin', active: true, mode: 'firebase', source: 'doc' };
+        return {
+          uid: user.uid,
+          email,
+          displayName,
+          role: 'admin',
+          active: true,
+          mode: 'firebase',
+          source: 'doc',
+        };
       }
       const role = bootstrap ? 'admin' : data.role || 'pending';
       const active = bootstrap ? true : data.active !== false;
@@ -155,7 +171,15 @@ export async function resolveUserRole() {
     } catch (e) {
       console.warn('[UserRole] could not create users/{uid} document:', e);
     }
-    return { uid: user.uid, email, displayName, role, active, mode: 'firebase', source: 'provisioned' };
+    return {
+      uid: user.uid,
+      email,
+      displayName,
+      role,
+      active,
+      mode: 'firebase',
+      source: 'provisioned',
+    };
   } catch (e) {
     console.warn('[UserRole] role resolution failed, defaulting to viewer:', e);
     // Safe degrade: read-only. Bootstrap admins stay admin (token-based in rules).
@@ -186,7 +210,7 @@ async function callAdmin(name, data) {
     const res = await httpsCallable(fbFunctions, name)(data || {});
     return res.data;
   } catch (e) {
-    throw new Error((e && e.message) || 'Operasi gagal');
+    throw new Error((e && e.message) || 'Operasi gagal', { cause: e });
   }
 }
 

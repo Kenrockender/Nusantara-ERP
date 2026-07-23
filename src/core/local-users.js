@@ -73,7 +73,9 @@ function readUsers() {
     const raw = localStorage.getItem(USERS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.users)) return parsed.users;
+      if (parsed && Array.isArray(parsed.users)) {
+        return parsed.users;
+      }
     }
   } catch (_) {
     /* ignore */
@@ -85,10 +87,12 @@ function writeUsers(users) {
 }
 
 function normUsername(u) {
-  var s = String(u || '').trim().toLowerCase();
+  const s = String(u || '')
+    .trim()
+    .toLowerCase();
   // Tolerate the old email-style login (and browser-autofilled emails): map
   // "admin@nusantara.local" → "admin". Usernames never contain "@".
-  var at = s.indexOf('@');
+  const at = s.indexOf('@');
   return at > 0 ? s.slice(0, at) : s;
 }
 
@@ -99,7 +103,9 @@ function normUsername(u) {
  */
 export async function ensureUsers() {
   let users = readUsers();
-  if (users && users.length) return users;
+  if (users && users.length) {
+    return users;
+  }
 
   users = [];
   // Migrate legacy single credential, if present, as the admin account.
@@ -125,7 +131,9 @@ export async function ensureUsers() {
   }
 
   for (const seed of SEED_USERS) {
-    if (users.some(u => u.username === seed.username)) continue;
+    if (users.some(u => u.username === seed.username)) {
+      continue;
+    }
     const salt = randomSalt();
     const passwordHash = await hashPassword(`${seed.username}123`, salt);
     users.push({
@@ -167,12 +175,16 @@ export function findUser(username) {
 export async function verifyUser(username, password) {
   await ensureUsers();
   const user = findUser(username);
-  if (!user || user.active === false) return null;
+  if (!user || user.active === false) {
+    return null;
+  }
   // Records predating the 600k bump carry a lower (or missing) `iterations`
   // field; verify at whatever cost they were hashed with.
   const iterations = user.iterations || PBKDF2_ITERATIONS_LEGACY;
   const hash = await hashPassword(password || '', user.salt, iterations);
-  if (hash !== user.passwordHash) return null;
+  if (hash !== user.passwordHash) {
+    return null;
+  }
   // Lazy cost upgrade: now that we hold the correct plaintext, re-hash at the
   // current iteration count so the stored hash strengthens on next login.
   if (iterations < PBKDF2_ITERATIONS) {
@@ -203,13 +215,19 @@ export async function verifyUser(username, password) {
 export async function addUser(username, displayName, password, role = 'admin') {
   await ensureUsers();
   const key = normUsername(username);
-  if (!key) throw new Error('Username wajib diisi');
+  if (!key) {
+    throw new Error('Username wajib diisi');
+  }
   if (!/^[a-z0-9._-]+$/.test(key)) {
     throw new Error('Username hanya boleh huruf, angka, titik, garis, dan garis bawah');
   }
-  if (!password || password.length < 6) throw new Error('Password minimal 6 karakter');
+  if (!password || password.length < 6) {
+    throw new Error('Password minimal 6 karakter');
+  }
   const users = readUsers() || [];
-  if (users.some(u => u.username === key)) throw new Error('Username sudah dipakai');
+  if (users.some(u => u.username === key)) {
+    throw new Error('Username sudah dipakai');
+  }
   const salt = randomSalt();
   const passwordHash = await hashPassword(password, salt);
   users.push({
@@ -229,11 +247,15 @@ export async function addUser(username, displayName, password, role = 'admin') {
 
 /** Set a user's password (admin reset or self change). */
 export async function setUserPassword(username, newPassword) {
-  if (!newPassword || newPassword.length < 6) throw new Error('Password minimal 6 karakter');
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('Password minimal 6 karakter');
+  }
   const users = readUsers() || [];
   const key = normUsername(username);
   const u = users.find(x => x.username === key);
-  if (!u) throw new Error('User tidak ditemukan');
+  if (!u) {
+    throw new Error('User tidak ditemukan');
+  }
   u.salt = randomSalt();
   u.passwordHash = await hashPassword(newPassword, u.salt);
   u.iterations = PBKDF2_ITERATIONS;
@@ -245,7 +267,9 @@ export async function setUserPassword(username, newPassword) {
 export function setUserRoleLocal(username, role) {
   const users = readUsers() || [];
   const u = users.find(x => x.username === normUsername(username));
-  if (!u) throw new Error('User tidak ditemukan');
+  if (!u) {
+    throw new Error('User tidak ditemukan');
+  }
   u.role = role;
   writeUsers(users);
   return true;
@@ -254,7 +278,9 @@ export function setUserRoleLocal(username, role) {
 export function setUserActive(username, active) {
   const users = readUsers() || [];
   const u = users.find(x => x.username === normUsername(username));
-  if (!u) throw new Error('User tidak ditemukan');
+  if (!u) {
+    throw new Error('User tidak ditemukan');
+  }
   u.active = !!active;
   writeUsers(users);
   return true;
@@ -263,10 +289,14 @@ export function setUserActive(username, active) {
 export function deleteUser(username) {
   let users = readUsers() || [];
   const key = normUsername(username);
-  if (key === 'admin') throw new Error('Akun admin utama tidak dapat dihapus');
+  if (key === 'admin') {
+    throw new Error('Akun admin utama tidak dapat dihapus');
+  }
   const before = users.length;
   users = users.filter(u => u.username !== key);
-  if (users.length === before) throw new Error('User tidak ditemukan');
+  if (users.length === before) {
+    throw new Error('User tidak ditemukan');
+  }
   writeUsers(users);
   return true;
 }
@@ -296,7 +326,9 @@ export function userHasTwoFactor(username) {
 export function saveUserTwoFactor(username, twoFactor) {
   const users = readUsers() || [];
   const u = users.find(x => x.username === normUsername(username));
-  if (!u) throw new Error('User tidak ditemukan');
+  if (!u) {
+    throw new Error('User tidak ditemukan');
+  }
   if (twoFactor == null) {
     delete u.twoFactor;
   } else {
@@ -313,7 +345,9 @@ export function recordLoginEvent(username, displayName, event, mode) {
     const raw = localStorage.getItem(LOG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) log = parsed;
+      if (Array.isArray(parsed)) {
+        log = parsed;
+      }
     }
     log.unshift({
       username,
@@ -322,7 +356,9 @@ export function recordLoginEvent(username, displayName, event, mode) {
       mode: mode || 'local',
       ts: Date.now(),
     });
-    if (log.length > LOG_CAP) log = log.slice(0, LOG_CAP);
+    if (log.length > LOG_CAP) {
+      log = log.slice(0, LOG_CAP);
+    }
     localStorage.setItem(LOG_KEY, JSON.stringify(log));
   } catch (_) {
     /* logging must never break auth */
@@ -334,7 +370,9 @@ export function getLoginLog() {
     const raw = localStorage.getItem(LOG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
     }
   } catch (_) {
     /* ignore */

@@ -8,7 +8,9 @@
   const hamburger = document.getElementById('hamburger');
   const sidebar = document.getElementById('sidebar');
   const backdrop = document.getElementById('sidebar-backdrop');
-  if (!hamburger || !sidebar || !backdrop) return;
+  if (!hamburger || !sidebar || !backdrop) {
+    return;
+  }
 
   function isMobile() {
     return window.innerWidth <= 768;
@@ -36,7 +38,7 @@
   }
 
   // Also observe sidebar for class changes (main.js might add 'open')
-  var sidebarObserver = new MutationObserver(function (mutations) {
+  const sidebarObserver = new MutationObserver(function (mutations) {
     if (isMobile() && sidebar.classList.contains('open') && !hamburger.classList.contains('open')) {
       // Sidebar was opened by external JS, sync the UI
       backdrop.classList.add('open');
@@ -114,7 +116,9 @@
 (function () {
   const overflowBtn = document.getElementById('topbar-overflow');
   const overflowMenu = document.getElementById('topbar-overflow-menu');
-  if (!overflowBtn || !overflowMenu) return;
+  if (!overflowBtn || !overflowMenu) {
+    return;
+  }
 
   // Re-parent to <body>: the topbar's backdrop-filter makes it the
   // containing block for position:fixed, so the mobile bottom-sheet rules
@@ -168,8 +172,12 @@
     const topbarAvatar = document.getElementById('topbar-avatar')?.innerHTML;
     const overflowName = document.getElementById('overflow-username');
     const overflowAvatar = document.getElementById('overflow-avatar');
-    if (overflowName && topbarName) overflowName.textContent = topbarName;
-    if (overflowAvatar && topbarAvatar) overflowAvatar.innerHTML = topbarAvatar;
+    if (overflowName && topbarName) {
+      overflowName.textContent = topbarName;
+    }
+    if (overflowAvatar && topbarAvatar) {
+      overflowAvatar.innerHTML = topbarAvatar;
+    }
   }
 
   // Observe changes to topbar user info

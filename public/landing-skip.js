@@ -3,8 +3,10 @@
 // Append ?stay=1 to force the landing page to render.
 (function () {
   try {
-    var params = new URLSearchParams(location.search);
-    if (params.get('stay') === '1') return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('stay') === '1') {
+      return;
+    }
     if (localStorage.getItem('cf-returning') === '1') {
       location.replace('/app.html');
     }

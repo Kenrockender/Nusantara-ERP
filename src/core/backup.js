@@ -99,50 +99,44 @@ const CHUNK_CHARS = 500000;
  * Create a backup (chunked manifest + chunks subcollection).
  */
 async function createBackup() {
-  try {
-    if (!cloudBackupAvailable()) {
-      throw new Error(
-        'Backup cloud hanya tersedia saat login cloud (Firebase). Gunakan Export ke file untuk mode lokal.'
-      );
-    }
-
-    const user = getCurrentUser();
-    if (!user) {
-      throw new Error('User not authenticated');
-    }
-
-    const json = JSON.stringify(DB);
-    const size = new Blob([json]).size;
-    const chunkCount = Math.max(1, Math.ceil(json.length / CHUNK_CHARS));
-
-    const backupId = `backup_${Date.now()}`;
-    for (let i = 0; i < chunkCount; i++) {
-      await setDoc(doc(firestore, BACKUP_COLLECTION, backupId, 'chunks', String(i)), {
-        data: json.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS),
-      });
-    }
-
-    // Manifest written LAST so a backup only becomes visible once all its
-    // chunks exist (an interrupted upload leaves orphan chunks, never a
-    // restorable-looking but corrupt backup).
-    await setDoc(doc(firestore, BACKUP_COLLECTION, backupId), {
-      userId: user.uid,
-      timestamp: serverTimestamp(),
-      size,
-      chunks: chunkCount,
-      version: DB._version || 1,
-    });
-
-    // Clean up old backups
-    await cleanupOldBackups(user.uid);
-
-    console.log(`✓ Backup created: ${backupId} (${chunkCount} chunks, ${formatBytes(size)})`);
-    return backupId;
-  } catch (error) {
-    // Callers (checkAndCreateBackup / forceBackup) decide how to surface this;
-    // logging here too would double up every failure in the console.
-    throw error;
+  if (!cloudBackupAvailable()) {
+    throw new Error(
+      'Backup cloud hanya tersedia saat login cloud (Firebase). Gunakan Export ke file untuk mode lokal.'
+    );
   }
+
+  const user = getCurrentUser();
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+
+  const json = JSON.stringify(DB);
+  const size = new Blob([json]).size;
+  const chunkCount = Math.max(1, Math.ceil(json.length / CHUNK_CHARS));
+
+  const backupId = `backup_${Date.now()}`;
+  for (let i = 0; i < chunkCount; i++) {
+    await setDoc(doc(firestore, BACKUP_COLLECTION, backupId, 'chunks', String(i)), {
+      data: json.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS),
+    });
+  }
+
+  // Manifest written LAST so a backup only becomes visible once all its
+  // chunks exist (an interrupted upload leaves orphan chunks, never a
+  // restorable-looking but corrupt backup).
+  await setDoc(doc(firestore, BACKUP_COLLECTION, backupId), {
+    userId: user.uid,
+    timestamp: serverTimestamp(),
+    size,
+    chunks: chunkCount,
+    version: DB._version || 1,
+  });
+
+  // Clean up old backups
+  await cleanupOldBackups(user.uid);
+
+  console.log(`✓ Backup created: ${backupId} (${chunkCount} chunks, ${formatBytes(size)})`);
+  return backupId;
 }
 
 /**
@@ -261,7 +255,9 @@ export async function restoreFromBackup(backupId) {
     if (!json && backupData.chunks) {
       const parts = [];
       for (let i = 0; i < backupData.chunks; i++) {
-        const chunkSnap = await getDoc(doc(firestore, BACKUP_COLLECTION, backupId, 'chunks', String(i)));
+        const chunkSnap = await getDoc(
+          doc(firestore, BACKUP_COLLECTION, backupId, 'chunks', String(i))
+        );
         if (!chunkSnap.exists()) {
           throw new Error(`Backup corrupt: chunk ${i}/${backupData.chunks} hilang`);
         }

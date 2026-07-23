@@ -456,11 +456,15 @@ function diffCollection(name) {
 
 /** Recursively remove undefined values so Firestore WriteBatch.set() doesn't reject them. */
 function stripUndefined(obj) {
-  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  if (Array.isArray(obj)) {
+    return obj.map(stripUndefined);
+  }
   if (obj !== null && typeof obj === 'object') {
     const out = {};
     for (const k of Object.keys(obj)) {
-      if (obj[k] !== undefined) out[k] = stripUndefined(obj[k]);
+      if (obj[k] !== undefined) {
+        out[k] = stripUndefined(obj[k]);
+      }
     }
     return out;
   }
@@ -1539,12 +1543,20 @@ function _coerceIdsToString(data) {
   ];
   COLLS.forEach(c => {
     const arr = data[c];
-    if (!Array.isArray(arr)) return;
+    if (!Array.isArray(arr)) {
+      return;
+    }
     arr.forEach(d => {
-      if (!d || typeof d !== 'object') return;
-      if ('id' in d) d.id = S(d.id);
+      if (!d || typeof d !== 'object') {
+        return;
+      }
+      if ('id' in d) {
+        d.id = S(d.id);
+      }
       REF.forEach(f => {
-        if (f in d && d[f] !== null && d[f] !== undefined) d[f] = S(d[f]);
+        if (f in d && d[f] !== null && d[f] !== undefined) {
+          d[f] = S(d[f]);
+        }
       });
       if (Array.isArray(d.lines)) {
         d.lines.forEach(l => {

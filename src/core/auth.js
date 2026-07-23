@@ -19,7 +19,11 @@ import {
   EmailAuthProvider,
 } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { auth as fbAuth, functions as fbFunctions, isFirebaseConfigured } from '../config/firebase.js';
+import {
+  auth as fbAuth,
+  functions as fbFunctions,
+  isFirebaseConfigured,
+} from '../config/firebase.js';
 import {
   ensureUsers,
   verifyUser,
@@ -273,7 +277,7 @@ async function call2FA(name, payload) {
     const { data } = await httpsCallable(fbFunctions, name)(payload || {});
     return data;
   } catch (e) {
-    throw new Error((e && e.message) || 'Operasi 2FA gagal');
+    throw new Error((e && e.message) || 'Operasi 2FA gagal', { cause: e });
   }
 }
 
@@ -318,7 +322,10 @@ export async function login(username, password) {
       }
       // Offline / unavailable / internal → degrade to local auth so the app
       // still works (mode 'local'); the badge will read "Lokal" until online.
-      console.warn('[Auth] Server login unavailable, falling back to local:', code || (e && e.message));
+      console.warn(
+        '[Auth] Server login unavailable, falling back to local:',
+        code || (e && e.message)
+      );
     }
   }
   return localLogin(username, password);
@@ -486,7 +493,10 @@ function newBackupCodes(n = BACKUP_CODE_COUNT) {
   for (let i = 0; i < n; i++) {
     const a = new Uint8Array(5);
     crypto.getRandomValues(a);
-    const hex = [...a].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const hex = [...a]
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
     codes.push(hex.slice(0, 5) + '-' + hex.slice(5, 10)); // XXXXX-XXXXX
   }
   return codes;
@@ -828,7 +838,7 @@ export async function changePassword(currentPassword, newPassword) {
     try {
       await call({ oldPassword: currentPassword, newPassword });
     } catch (e) {
-      throw new Error((e && e.message) || 'Gagal mengganti password');
+      throw new Error((e && e.message) || 'Gagal mengganti password', { cause: e });
     }
   } else {
     // Local (offline) session: verify + set against the browser store.

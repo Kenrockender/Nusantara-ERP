@@ -10,10 +10,7 @@ const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /** Decode an RFC 4648 base32 string → Buffer. Tolerates spaces / padding / case. */
 export function base32Decode(str) {
-  const clean = String(str)
-    .toUpperCase()
-    .replace(/=+$/, '')
-    .replace(/\s+/g, '');
+  const clean = String(str).toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
   let bits = 0;
   let value = 0;
   const out = [];
@@ -63,7 +60,11 @@ export function hotp(secretBytes, counter, digits = 6) {
  * Verify a user-entered `token` against a base32 `secret`, allowing ±`window`
  * time steps for clock drift.
  */
-export function verifyTOTP(secret, token, { time = Date.now(), step = 30, digits = 6, window = 1 } = {}) {
+export function verifyTOTP(
+  secret,
+  token,
+  { time = Date.now(), step = 30, digits = 6, window = 1 } = {}
+) {
   const clean = String(token || '').replace(/\s+/g, '');
   if (!/^\d+$/.test(clean) || clean.length !== digits) {
     return false;
