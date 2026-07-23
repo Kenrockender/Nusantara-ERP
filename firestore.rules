@@ -94,7 +94,12 @@ service cloud.firestore {
     function canWriteModule(m) {
       return isAdmin() ? true
         : role() == 'manajer' ? (m in ['sales','purchases','inventory','master','assets','gl','operational','config'])
-        : role() == 'akunting' ? (m in ['gl','tax','operational'])
+        // 'config' included so akunting (tax: FULL client-side) can actually
+        // persist tax settings, which live in the shared 'settings' doc
+        // (module 'config' — there is no dedicated 'tax' collection). Side
+        // effect: akunting can also write the rest of that doc (company
+        // profile, reference lists) — same breadth manajer already has.
+        : role() == 'akunting' ? (m in ['gl','tax','operational','config'])
         : role() == 'penjualan' ? (m in ['sales','master','operational'])
         : false; // viewer (read-only) / pending / unknown
     }
