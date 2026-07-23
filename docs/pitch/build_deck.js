@@ -43,8 +43,6 @@ async function icon(IconComponent, color = '#FFFFFF', size = 256) {
   pres.layout = 'W';
   pres.author = 'Nusantara ERP';
   pres.title = 'Nusantara ERP — Pitch';
-  const W = 13.333,
-    H = 7.5;
 
   // pre-render icons
   const I = {

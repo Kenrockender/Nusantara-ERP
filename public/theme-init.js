@@ -5,7 +5,7 @@
   try {
     const theme = localStorage.getItem('erp_theme') || 'dark';
     document.documentElement.setAttribute('data-theme', theme);
-  } catch (e) {
+  } catch (_e) {
     document.documentElement.setAttribute('data-theme', 'dark');
   }
 })();

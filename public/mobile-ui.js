@@ -38,7 +38,7 @@
   }
 
   // Also observe sidebar for class changes (main.js might add 'open')
-  const sidebarObserver = new MutationObserver(function (mutations) {
+  const sidebarObserver = new MutationObserver(function (_mutations) {
     if (isMobile() && sidebar.classList.contains('open') && !hamburger.classList.contains('open')) {
       // Sidebar was opened by external JS, sync the UI
       backdrop.classList.add('open');

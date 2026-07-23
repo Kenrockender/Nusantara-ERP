@@ -6,7 +6,6 @@
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   setDoc,
   onSnapshot,
@@ -572,7 +571,6 @@ async function flushDirtyCollections() {
 // loadGlSeed() populates DB.journals / DB.accountsChart from there.
 // ─────────────────────────────────────────────────────────────────────────────
 const GL_SEED = 'glSeed';
-const GL_JOURNAL_CHUNK = 1000; // ~0.38 KB/entry → ~380 KB/doc, safely < 1 MB
 
 async function loadGlSeed() {
   try {

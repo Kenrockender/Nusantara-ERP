@@ -9,14 +9,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import {
-  signInWithEmailAndPassword,
   signInWithCustomToken,
   sendEmailVerification,
   signOut,
   onAuthStateChanged,
-  updatePassword,
-  reauthenticateWithCredential,
-  EmailAuthProvider,
 } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import {
@@ -46,45 +42,6 @@ let _pending2FA = null;
 const _useFirebase = isFirebaseConfigured && !!fbAuth;
 // Tracks which path authenticated the active session: 'firebase' | 'local'.
 let _activeMode = null;
-
-// Auth error codes that mean "Firebase Auth can't be used right now" — we fall
-// back to local auth so the app keeps working (offline, provider not enabled, …).
-const UNREACHABLE = new Set([
-  'auth/network-request-failed',
-  'auth/operation-not-allowed',
-  'auth/configuration-not-found',
-  'auth/internal-error',
-  'auth/invalid-api-key',
-  'auth/api-key-not-valid',
-  'auth/app-deleted',
-]);
-
-function mapFbUser(u) {
-  return {
-    uid: u.uid,
-    email: u.email,
-    displayName: u.displayName || (u.email ? u.email.split('@')[0] : 'user'),
-    emailVerified: !!u.emailVerified,
-  };
-}
-
-function friendlyAuthError(code) {
-  switch (code) {
-    case 'auth/invalid-email':
-      return 'Format email tidak valid';
-    case 'auth/user-disabled':
-      return 'Akun ini dinonaktifkan';
-    case 'auth/user-not-found':
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-    case 'auth/invalid-login-credentials':
-      return 'Email atau password salah';
-    case 'auth/too-many-requests':
-      return 'Terlalu banyak percobaan — coba lagi nanti';
-    default:
-      return 'Terjadi kesalahan saat login';
-  }
-}
 
 // Resolve the first auth-state callback (the persisted user on reload), with a
 // safety timeout so boot never hangs if the SDK stalls.

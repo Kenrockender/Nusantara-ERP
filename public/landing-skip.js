@@ -10,7 +10,7 @@
     if (localStorage.getItem('cf-returning') === '1') {
       location.replace('/app.html');
     }
-  } catch (e) {
+  } catch (_e) {
     /* ignore */
   }
 })();
