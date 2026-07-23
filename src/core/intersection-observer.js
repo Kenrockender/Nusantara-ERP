@@ -190,33 +190,6 @@ export function setupAnimationPausing() {
 }
 
 /**
- * Lazy load chart libraries
- */
-export async function lazyLoadChart(container) {
-  if (!('IntersectionObserver' in window)) {
-    // Load immediately if no IntersectionObserver
-    return import('chart.js');
-  }
-
-  return new Promise(resolve => {
-    const observer = new IntersectionObserver(
-      async entries => {
-        if (entries[0].isIntersecting) {
-          observer.disconnect();
-          const chartModule = await import('chart.js');
-          resolve(chartModule);
-        }
-      },
-      {
-        rootMargin: '100px',
-      }
-    );
-
-    observer.observe(container);
-  });
-}
-
-/**
  * Virtual scrolling for large lists
  */
 export class VirtualScroller {

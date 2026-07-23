@@ -177,6 +177,19 @@ export default defineConfig({
         // rewrite) and directly at `/app.html`.
         main: resolve(__dirname, 'app.html'),
       },
+      output: {
+        // Split the large, rarely-changing SDKs out of the app's main chunk so
+        // (a) the single >1MB chunk warning goes away and (b) these vendor
+        // chunks stay browser-cached across app deploys that don't touch them.
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+            return 'vendor-firebase';
+          }
+          if (id.includes('node_modules/chart.js')) {
+            return 'vendor-chart';
+          }
+        },
+      },
     },
     chunkSizeWarningLimit: 1000,
     minify: 'terser',
