@@ -4,7 +4,11 @@ import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-import { getAnalytics } from 'firebase/analytics';
+// Privacy-first: Google Analytics is intentionally NOT loaded — no page-view
+// telemetry about this ERP's usage is ever sent to Google. (Previously
+// getAnalytics(app) ran in production.) The CSP in firebase.json also drops
+// the googletagmanager/google-analytics origins so it can't be re-added by
+// accident. Re-enable only with an explicit privacy decision.
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -14,7 +18,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  // measurementId intentionally omitted — Analytics is disabled (privacy-first).
 };
 
 // Validate configuration. Exported so data modules can skip doomed Firestore
@@ -36,7 +40,6 @@ let auth = null;
 let db = null;
 let storage = null;
 let functions = null;
-let analytics = null;
 
 // Cloud Functions region — must match the deploy region of the auth callables
 // (loginWithUsername, …) in functions/. They deploy to the default us-central1.
@@ -51,9 +54,6 @@ if (isFirebaseConfigured) {
   db = getFirestore(app, import.meta.env.VITE_FIREBASE_DB_ID || '(default)');
   storage = getStorage(app);
   functions = getFunctions(app, FUNCTIONS_REGION);
-  if (typeof window !== 'undefined' && import.meta.env.PROD) {
-    analytics = getAnalytics(app);
-  }
 }
 
 // Connect to emulators in development (only when Firebase is configured)
@@ -66,4 +66,4 @@ if (isFirebaseConfigured && import.meta.env.DEV && import.meta.env.VITE_USE_EMUL
   console.log('🔧 Connected to Firebase Emulators');
 }
 
-export { app, auth, db, storage, functions, analytics };
+export { app, auth, db, storage, functions };
