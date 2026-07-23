@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// NSA ERP — Nested Document Tabs  (doc-tabs.js)
+// Nusantara ERP — Nested Document Tabs  (doc-tabs.js)
 //
 // Accurate Online-style SECOND-LEVEL tabs. The top bar (view-tabs.js) gives one
 // tab per open module (Purchase Order, Sales Order, …). This adds a strip INSIDE

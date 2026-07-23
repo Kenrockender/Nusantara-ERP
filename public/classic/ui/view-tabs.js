@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// NSA ERP — Multi-tab View Bar  (view-tabs.js)
+// Nusantara ERP — Multi-tab View Bar  (view-tabs.js)
 //
 // Accurate Online-style open-page tabs: every view opened via navigate() gets a
 // tab in a bar under the topbar. Clicking a tab switches views (the DOM already
