@@ -21,13 +21,25 @@ service firebase.storage {
       return request.resource.size < 10 * 1024 * 1024;
     }
 
-    // Config-writer roles (admin/manajer) carry a role claim on the custom token.
-    // A null claim means an email/password bootstrap-admin session (no claim is
-    // minted for that path) — allowed so the owner is never locked out. Everyone
-    // else (viewer/penjualan/akunting/pending) is denied config writes.
-    function canWriteConfig() {
+    // Email/password bootstrap-admin session (no role claim is minted for that
+    // path — only the username→custom-token flow mints one). Must match
+    // firestore.rules's bootstrapAdmin() exactly so the owner is never locked
+    // out. Checking the specific email (not just "claim is null") matters:
+    // any other email/password account would also have a null claim, and a
+    // bare null check would silently hand it config-write access too.
+    function isBootstrapAdmin() {
       return isAuthenticated() &&
-             (request.auth.token.role == null ||
+             request.auth.token.email != null &&
+             request.auth.token.email in ['kenrockender521@gmail.com'];
+    }
+
+    // Config-writer roles (admin/manajer) carry a role claim on the custom
+    // token. Everyone else (viewer/penjualan/akunting/pending) is denied
+    // config writes.
+    function canWriteConfig() {
+      return isBootstrapAdmin() ||
+             (isAuthenticated() &&
+              request.auth.token.role != null &&
               request.auth.token.role in ['admin', 'manajer']);
     }
 
