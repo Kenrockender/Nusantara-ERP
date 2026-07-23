@@ -283,6 +283,7 @@ export async function loadDB() {
   }
 
   try {
+    // eslint-disable-next-line no-console
     console.log('[DB] Loading data from Firestore...');
 
     // Load all collections in parallel
@@ -339,6 +340,7 @@ export async function loadDB() {
     // Set up real-time listeners
     setupRealtimeListeners();
 
+    // eslint-disable-next-line no-console
     console.log('✓ Data loaded from Firestore');
     usingLocalStore = false;
     try {
@@ -555,6 +557,7 @@ async function flushDirtyCollections() {
   for (const [name, diff] of dirty) {
     _savedSnapshot.set(name, diff.snapshot);
   }
+  // eslint-disable-next-line no-console
   console.log(`✓ Data saved to Firestore (${total} operations, ${dirty.length} collections)`);
 }
 
@@ -595,6 +598,7 @@ async function loadGlSeed() {
       DB.accountsChart = accountsChart;
     }
     syncDBGlobal();
+    // eslint-disable-next-line no-console
     console.log(
       `[DB] GL seed loaded from Firestore: ${journals.length} journals, ${(accountsChart || []).length} accounts`
     );
@@ -713,6 +717,7 @@ export async function saveDB(collectionName = null, data = null) {
     try {
       await saveCollection(collectionName, data);
       markCollectionSaved(collectionName, data);
+      // eslint-disable-next-line no-console
       console.log(`✓ ${collectionName} saved to Firestore`);
     } catch (error) {
       reportSaveError(error);
@@ -948,6 +953,7 @@ function setupRealtimeListeners() {
     listeners.set(collectionName, unsubscribe);
   });
 
+  // eslint-disable-next-line no-console
   console.log('✓ Real-time listeners active');
 }
 
@@ -957,6 +963,7 @@ function setupRealtimeListeners() {
 export function cleanupListeners() {
   listeners.forEach(unsubscribe => unsubscribe());
   listeners.clear();
+  // eslint-disable-next-line no-console
   console.log('✓ Listeners cleaned up');
 }
 
@@ -981,8 +988,10 @@ export async function migrateLocalToFirestore(onProgress) {
     const saved = await readLocalSaved();
     if (saved) {
       source = saved;
+      // eslint-disable-next-line no-console
       console.log('[Migrate] Source: local store');
     } else {
+      // eslint-disable-next-line no-console
       console.log('[Migrate] Source: in-memory DB');
     }
   } catch (_) {

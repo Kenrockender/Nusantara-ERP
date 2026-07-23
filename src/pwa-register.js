@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- PWA lifecycle logging is the point here */
 // PWA Service Worker Registration
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) {

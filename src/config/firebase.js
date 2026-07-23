@@ -62,6 +62,7 @@ if (isFirebaseConfigured && import.meta.env.DEV && import.meta.env.VITE_USE_EMUL
   connectFirestoreEmulator(db, 'localhost', 8080);
   connectStorageEmulator(storage, 'localhost', 9199);
   connectFunctionsEmulator(functions, 'localhost', 5001);
+  // eslint-disable-next-line no-console
   console.log('🔧 Connected to Firebase Emulators');
 }
 

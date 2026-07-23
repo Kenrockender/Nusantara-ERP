@@ -999,5 +999,6 @@ async function icon(IconComponent, color = '#FFFFFF', size = 256) {
   );
 
   await pres.writeFile({ fileName: 'Nusantara_ERP_Pitch.pptx' });
+  // eslint-disable-next-line no-console -- CLI build script, this is its output
   console.log('WROTE Nusantara_ERP_Pitch.pptx');
 })();

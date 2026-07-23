@@ -362,6 +362,7 @@ class PerformanceMonitor {
     const metrics = this.getMetrics();
     const score = this.getPerformanceScore();
 
+    /* eslint-disable no-console -- this method's entire purpose is to print the report */
     console.group('📊 Performance Report');
     console.log('Score:', score + '/100');
     console.log('Navigation:', metrics.navigation);
@@ -370,6 +371,7 @@ class PerformanceMonitor {
     console.log('Memory:', metrics.memory);
     console.log('Connection:', metrics.connection);
     console.groupEnd();
+    /* eslint-enable no-console */
 
     return { metrics, score };
   }

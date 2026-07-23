@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- app boot sequence is traced to the console by design */
 // Import core modules
 import {
   initAuth,

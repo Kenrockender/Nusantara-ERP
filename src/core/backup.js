@@ -50,6 +50,7 @@ export function initBackup() {
   // Set up periodic backup
   backupTimer = setInterval(checkAndCreateBackup, BACKUP_INTERVAL);
 
+  // eslint-disable-next-line no-console
   console.log('✓ Backup system initialized');
 }
 
@@ -135,6 +136,7 @@ async function createBackup() {
   // Clean up old backups
   await cleanupOldBackups(user.uid);
 
+  // eslint-disable-next-line no-console
   console.log(`✓ Backup created: ${backupId} (${chunkCount} chunks, ${formatBytes(size)})`);
   return backupId;
 }
@@ -180,6 +182,7 @@ async function cleanupOldBackups(userId) {
         }
         await deleteDoc(doc(firestore, BACKUP_COLLECTION, backup.id));
       }
+      // eslint-disable-next-line no-console
       console.log(`✓ Cleaned up ${toDelete.length} old backups`);
     }
   } catch (error) {
@@ -278,6 +281,7 @@ export async function restoreFromBackup(backupId) {
     // Save to Firestore
     await saveDB();
 
+    // eslint-disable-next-line no-console
     console.log('✓ Backup restored:', backupId);
   } catch (error) {
     console.error('Failed to restore backup:', error);

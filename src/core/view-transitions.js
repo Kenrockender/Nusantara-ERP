@@ -2,6 +2,7 @@
 // VIEW TRANSITIONS API UTILITIES
 // Smooth page transitions using the modern View Transitions API
 // ═══════════════════════════════════════════════════════════════════════════════
+/* eslint-disable no-console -- transition tracing is the point of these callbacks */
 
 /**
  * Check if View Transitions API is supported
