@@ -4,11 +4,19 @@ function _applyUserIdentity() {
   // cosmetic DB.settings.user fields, so each user sees their own identity/role.
   const me = window.__ERP_USER || {};
   const roleLabels = (window.erpUsers && window.erpUsers.roleLabels) || {};
-  // Keep the configured display name (nice "Nama Lengkap"); fall back to the
-  // signed-in account's name only when none is set. The ROLE, however, always
-  // reflects the real RBAC role from users/{uid}. (Per-user names will later be
-  // sourced from the Employee master — see TODO employee-user-link.)
-  const name = u.name || me.displayName || 'Pengguna';
+  // Employee-user link: an Employee master record whose email matches the
+  // signed-in account gives each user their own real name/jabatan instead of
+  // the single shared DB.settings.user fields (which every account otherwise
+  // sees identically).
+  const myEmployee =
+    me.email &&
+    (DB.employees || []).find(
+      e => e.email && e.email.toLowerCase() === String(me.email).toLowerCase()
+    );
+  // Priority: linked Employee name (per-user, real) > the shared configured
+  // display name > the auth account's own name > a generic placeholder. The
+  // ROLE always reflects the real RBAC role from users/{uid}.
+  const name = (myEmployee && myEmployee.name) || u.name || me.displayName || 'Pengguna';
   const initials =
     u.initials ||
     name
